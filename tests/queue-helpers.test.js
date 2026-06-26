@@ -4,6 +4,7 @@ import {
   isIdlePlayback,
   popNextFromQueue,
   removeQueueItemAndAbove,
+  removeQueueItemById,
   shouldAutoPlayOnEnqueue,
 } from "../server/queue-helpers.js";
 import { makeStore, makeTrack } from "./helpers/store-fixture.js";
@@ -60,6 +61,34 @@ describe("queue-helpers", () => {
     store.playback.currentTrackId = null;
     store.playback.state = "playing";
     assert.equal(shouldAutoPlayOnEnqueue(store), false);
+  });
+
+  it("removeQueueItemById removes single entry", () => {
+    const store = makeStore({
+      queue: [
+        { id: 1, trackId: 10, position: 0 },
+        { id: 2, trackId: 20, position: 1 },
+      ],
+    });
+    assert.equal(removeQueueItemById(store, 1), true);
+    assert.deepEqual(
+      store.queue.map((q) => q.id),
+      [2]
+    );
+    assert.equal(store.queue[0].position, 0);
+    assert.equal(removeQueueItemById(store, 99), false);
+  });
+
+  it("removeQueueItemAndAbove accepts string queue id", () => {
+    const store = makeStore({
+      queue: [
+        { id: 5, trackId: 10, position: 0 },
+        { id: 6, trackId: 20, position: 1 },
+      ],
+    });
+    const item = removeQueueItemAndAbove(store, "6");
+    assert.equal(item.trackId, 20);
+    assert.equal(store.queue.length, 0);
   });
 
   it("isIdlePlayback", () => {

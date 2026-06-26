@@ -20,6 +20,28 @@ class MPVClient {
     this.handlers.push(handler);
   }
 
+  onceEvent(predicate, timeoutMs = 12000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.handlers = this.handlers.filter((h) => h !== handler);
+        reject(new Error("Audio engine timeout"));
+      }, timeoutMs);
+      const handler = (event) => {
+        try {
+          if (!predicate(event)) return;
+          clearTimeout(timer);
+          this.handlers = this.handlers.filter((h) => h !== handler);
+          resolve(event);
+        } catch (err) {
+          clearTimeout(timer);
+          this.handlers = this.handlers.filter((h) => h !== handler);
+          reject(err);
+        }
+      };
+      this.handlers.push(handler);
+    });
+  }
+
   ipcPath() {
     if (config.isWindows) {
       return `\\\\.\\pipe\\euterpe-${path.basename(config.mpvSocket)}`;
@@ -189,7 +211,9 @@ class MPVClient {
     }
     const uri = pathToFileURL(resolved).href;
     console.log(`loadfile: ${uri}`);
+    const loaded = this.onceEvent((e) => e.event === "file-loaded");
     await this.command("loadfile", uri, "replace");
+    await loaded;
   }
 
   async pause(paused = true) {

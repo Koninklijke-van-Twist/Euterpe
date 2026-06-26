@@ -197,6 +197,9 @@ export async function handleApi(req, res, url) {
 
   if (method === "POST" && pathname.match(/^\/api\/queue\/\d+\/play$/)) {
     const id = Number(pathname.split("/")[3]);
+    if (!Number.isFinite(id)) {
+      return json(res, 400, { detail: "Invalid queue id" });
+    }
     try {
       await playback.playQueueItemNow(id);
       await broadcastStatus();
@@ -208,16 +211,11 @@ export async function handleApi(req, res, url) {
 
   if (method === "DELETE" && pathname.match(/^\/api\/queue\/\d+$/)) {
     const id = Number(pathname.split("/").pop());
+    if (!Number.isFinite(id)) {
+      return json(res, 400, { detail: "Invalid queue id" });
+    }
     try {
-      await updateStore((store) => {
-        store.queue.sort((a, b) => a.position - b.position);
-        const idx = store.queue.findIndex((q) => q.id === id);
-        if (idx === -1) throw Object.assign(new Error("Not found"), { status: 404 });
-        store.queue.splice(idx, 1);
-        store.queue.forEach((q, i) => {
-          q.position = i;
-        });
-      });
+      await playback.removeFromQueue(id);
       await broadcastStatus();
       return noContent(res);
     } catch (err) {

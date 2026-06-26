@@ -11,9 +11,24 @@ export function popNextFromQueue(store) {
   return null;
 }
 
-export function removeQueueItemAndAbove(store, queueItemId) {
+export function removeQueueItemById(store, queueItemId) {
+  const id = Number(queueItemId);
+  if (!Number.isFinite(id)) return false;
   store.queue.sort((a, b) => a.position - b.position);
-  const idx = store.queue.findIndex((q) => q.id === queueItemId);
+  const idx = store.queue.findIndex((q) => q.id === id);
+  if (idx === -1) return false;
+  store.queue.splice(idx, 1);
+  store.queue.forEach((q, i) => {
+    q.position = i;
+  });
+  return true;
+}
+
+export function removeQueueItemAndAbove(store, queueItemId) {
+  const id = Number(queueItemId);
+  if (!Number.isFinite(id)) return null;
+  store.queue.sort((a, b) => a.position - b.position);
+  const idx = store.queue.findIndex((q) => q.id === id);
   if (idx === -1) return null;
   store.queue.splice(0, idx);
   const [item] = store.queue.splice(0, 1);

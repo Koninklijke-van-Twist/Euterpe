@@ -5,6 +5,17 @@ let status = null;
 let editingPlaylist = null;
 let selectedTrackIds = [];
 let eventSource = null;
+let suppressQueueSseUntil = 0;
+
+function suppressQueueSse(ms = 2000) {
+  suppressQueueSseUntil = Date.now() + ms;
+}
+
+async function refreshPlaybackUi() {
+  status = await api("/api/playback/status");
+  renderPlayer();
+  renderQueue();
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,7 +50,7 @@ function connectEvents() {
   eventSource.onmessage = (e) => {
     status = JSON.parse(e.data);
     renderPlayer();
-    renderQueue();
+    if (Date.now() >= suppressQueueSseUntil) renderQueue();
   };
 }
 
@@ -85,7 +96,7 @@ function renderTracks() {
 
 function renderQueue() {
   const list = $("queue-list");
-  const queue = status?.queue || [];
+  const queue = (status?.queue || []).filter((item) => item?.track);
   if (!queue.length) {
     list.innerHTML = '<li class="empty-state">Wachtrij is leeg</li>';
     return;
@@ -97,8 +108,8 @@ function renderQueue() {
         <div class="meta">${esc(item.track.artist || "Onbekend")} · ${formatTime(item.track.duration)}</div>
       </div>
       <div class="track-actions">
-        <button class="btn-small" data-play-queue="${item.id}">Speel nu</button>
-        <button class="btn-danger" data-remove-queue="${item.id}">✕</button>
+        <button type="button" class="btn-small" data-play-queue="${item.id}">Speel nu</button>
+        <button type="button" class="btn-danger" data-remove-queue="${item.id}">✕</button>
       </div>
     </li>
   `).join("");
@@ -257,14 +268,48 @@ async function uploadFiles(files) {
   renderTracks();
 }
 
+function clickTarget(e, selector) {
+  return e.target instanceof Element ? e.target.closest(selector) : null;
+}
+
 document.addEventListener("click", async (e) => {
+  const playQueueEl = clickTarget(e, "[data-play-queue]");
+  if (playQueueEl) {
+    e.preventDefault();
+    const id = playQueueEl.getAttribute("data-play-queue");
+    suppressQueueSse();
+    try {
+      await api(`/api/queue/${id}/play`, { method: "POST" });
+      await refreshPlaybackUi();
+    } catch (err) {
+      await refreshPlaybackUi();
+      alert(err.message || "Afspelen mislukt");
+    }
+    return;
+  }
+
+  const removeQueueEl = clickTarget(e, "[data-remove-queue]");
+  if (removeQueueEl) {
+    e.preventDefault();
+    const id = Number(removeQueueEl.getAttribute("data-remove-queue"));
+    suppressQueueSse();
+    try {
+      await api(`/api/queue/${id}`, { method: "DELETE" });
+      await refreshPlaybackUi();
+    } catch (err) {
+      await refreshPlaybackUi();
+      alert(err.message || "Verwijderen uit wachtrij mislukt");
+    }
+    return;
+  }
+
   const t = e.target;
   if (!(t instanceof HTMLElement)) return;
 
   if (t.dataset.queue) {
+    suppressQueueSse();
     await api("/api/queue", { method: "POST", body: JSON.stringify({ track_id: Number(t.dataset.queue) }) });
-    status = await api("/api/playback/status");
-    renderQueue();
+    await refreshPlaybackUi();
   }
   if (t.dataset.deleteTrack) {
     const track = tracks.find((tr) => tr.id === Number(t.dataset.deleteTrack));
@@ -287,22 +332,7 @@ document.addEventListener("click", async (e) => {
     } catch (err) {
       alert(err.message || "Herstellen mislukt");
     }
-  }
-  if (t.dataset.playQueue) {
-    try {
-      await api(`/api/queue/${t.dataset.playQueue}/play`, { method: "POST" });
-    } catch (err) {
-      alert(err.message || "Afspelen mislukt");
-    }
-  }
-  if (t.dataset.removeQueue) {
-    try {
-      await api(`/api/queue/${t.dataset.removeQueue}`, { method: "DELETE" });
-      status = await api("/api/playback/status");
-      renderQueue();
-    } catch (err) {
-      alert(err.message || "Verwijderen uit wachtrij mislukt");
-    }
+    return;
   }
   if (t.dataset.playPl) {
     await api(`/api/playlists/${t.dataset.playPl}/play`, { method: "POST" });
