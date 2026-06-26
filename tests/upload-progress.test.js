@@ -34,4 +34,9 @@ describe("upload modal ui", () => {
     assert.match(src, /uploadFileWithProgress/);
     assert.match(src, /overallUploadProgress/);
   });
+
+  it("app does not redeclare suppressQueueSseUntil", () => {
+    const src = fs.readFileSync(path.join(root, "public/app.js"), "utf8");
+    assert.equal((src.match(/\blet suppressQueueSseUntil\b/g) || []).length, 1);
+  });
 });

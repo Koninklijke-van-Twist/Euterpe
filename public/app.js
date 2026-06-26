@@ -8,6 +8,7 @@ let editingPlaylist = null;
 let playlistPickerTrackId = null;
 let eventSource = null;
 let suppressQueueSseUntil = 0;
+let uploadInProgress = false;
 
 function isPlaylistMode() {
   return status?.active_playlist_id != null;
@@ -469,9 +470,6 @@ uploadZone.addEventListener("drop", (e) => {
   uploadFiles(e.dataTransfer.files);
 });
 fileInput.addEventListener("change", (e) => uploadFiles(e.target.files));
-
-let suppressQueueSseUntil = 0;
-let uploadInProgress = false;
 
 function openUploadModal(fileCount) {
   $("upload-modal-title").textContent = fileCount > 1 ? `${fileCount} nummers uploaden` : "Nummer uploaden";
