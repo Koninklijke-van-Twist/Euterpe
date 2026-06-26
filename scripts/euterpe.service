@@ -9,7 +9,8 @@ Type=simple
 User=@SERVICE_USER@
 Group=@SERVICE_USER@
 WorkingDirectory=@INSTALL_DIR@
-ExecStart=@INSTALL_DIR@/scripts/run.sh
+# sh leest het script — werkt ook bij noexec-mounts (chmod helpt dan niet)
+ExecStart=/bin/sh @INSTALL_DIR@/scripts/run.sh
 
 # run.sh loopt zelf; dit vangt crashes van het wrapper-script
 Restart=always

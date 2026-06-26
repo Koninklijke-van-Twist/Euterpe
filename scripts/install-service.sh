@@ -14,6 +14,24 @@ UNIT_PATH="/etc/systemd/system/euterpe.service"
 ENV_DIR="/etc/euterpe"
 ENV_FILE="${ENV_DIR}/env"
 
+if [[ "${ROOT}" != /* ]]; then
+  echo "Installatiepad moet absoluut zijn, kreeg: ${ROOT}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${ROOT}/scripts/run.sh" ]]; then
+  echo "run.sh niet gevonden in ${ROOT}/scripts — voer dit script uit vanuit de repo." >&2
+  exit 1
+fi
+
+if [[ ! -x /bin/sh ]]; then
+  echo "/bin/sh niet gevonden" >&2
+  exit 1
+fi
+
+# Windows CRLF → Linux LF (voorkomt 'Permission denied' bij systemd EXEC)
+sed -i 's/\r$//' "${ROOT}/scripts/run.sh" "${ROOT}/scripts/restart.sh" 2>/dev/null || true
+
 chmod +x "${ROOT}/scripts/run.sh" "${ROOT}/scripts/restart.sh"
 
 sed \
@@ -26,6 +44,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   cat > "${ENV_FILE}" <<EOF
 # Euterpe environment (geladen door systemd)
 # EUTERPE_PORT=8000
+# EUTERPE_EXTRA_PORTS=80
 # EUTERPE_DATA_DIR=${ROOT}/data
 # EUTERPE_MPV_PATH=mpv
 EOF
@@ -38,6 +57,10 @@ systemctl enable euterpe.service
 systemctl restart euterpe.service
 
 echo "Euterpe service geïnstalleerd."
-echo "  Status:  systemctl status euterpe"
-echo "  Logs:    journalctl -u euterpe -f"
-echo "  Config:  ${ENV_FILE}"
+echo "  Installatiemap: ${ROOT}"
+echo "  ExecStart:      $(grep '^ExecStart=' "${UNIT_PATH}")"
+echo "  Status:         systemctl status euterpe"
+echo "  Logs:           journalctl -u euterpe -f"
+echo "  Config:         ${ENV_FILE}"
+echo ""
+echo "Na wijzigingen in ${ENV_FILE}: sudo systemctl restart euterpe"

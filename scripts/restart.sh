@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Update from git and start Euterpe. Blocks until Node exits.
-set -euo pipefail
+set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

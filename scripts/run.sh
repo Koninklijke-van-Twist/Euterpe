@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Production wrapper: restart (update + start) whenever Node exits.
-set -euo pipefail
+set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 while true; do
-  bash scripts/restart.sh
+  sh scripts/restart.sh
   echo "[euterpe] server stopped, restarting in 2s…"
   sleep 2
 done

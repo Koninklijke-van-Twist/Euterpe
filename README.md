@@ -95,6 +95,26 @@ sudo systemctl restart euterpe
 
 Configuratie via `/etc/euterpe/env` (zie `scripts/euterpe.env.example`). De service-user moet `git pull` kunnen uitvoeren in de installatiemap (SSH-key of credential helper).
 
+**Na wijziging van `/etc/euterpe/env`:** `sudo systemctl restart euterpe` (de Herstart-knop in de UI herlaadt alleen Node, niet de systemd-omgeving).
+
+### Service start niet (203/EXEC)
+
+Als `journalctl` meldt `Failed at step EXEC` / `Permission denied` op `run.sh`, terwijl `sh scripts/run.sh` handmatig wél werkt:
+
+1. Herinstalleer de unit (start via `sh`, niet direct het script — nodig op `noexec`-schijven):
+   ```bash
+   cd /Euterpe   # jouw installatiepad
+   sudo ./scripts/install-service.sh
+   sudo systemctl daemon-reload
+   sudo systemctl restart euterpe
+   ```
+2. Controleer dat `ExecStart` een interpreter gebruikt:
+   ```bash
+   systemctl cat euterpe | grep ExecStart
+   # ExecStart=/bin/sh /Euterpe/scripts/run.sh
+   ```
+3. Zie je alleen `ExecStart=/Euterpe/scripts/run.sh` zonder `/bin/sh`, dan is de unit verouderd.
+
 Voor development met auto-restart:
 
 ```bash
