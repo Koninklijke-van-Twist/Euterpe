@@ -58,8 +58,42 @@ function resolveMpvPath() {
   return name;
 }
 
+/** @param {NodeJS.ProcessEnv} [env] */
+export function parseListenPorts(env = process.env) {
+  const parsePart = (part) => {
+    const n = Number(String(part).trim());
+    return Number.isFinite(n) && n > 0 && n <= 65535 ? n : null;
+  };
+
+  if (env.EUTERPE_PORTS) {
+    return [
+      ...new Set(
+        env.EUTERPE_PORTS.split(",")
+          .map(parsePart)
+          .filter((n) => n != null)
+      ),
+    ];
+  }
+
+  const ports = [];
+  const primary = parsePart(env.EUTERPE_PORT ?? "8000");
+  if (primary != null) ports.push(primary);
+
+  if (env.EUTERPE_EXTRA_PORTS) {
+    for (const part of env.EUTERPE_EXTRA_PORTS.split(",")) {
+      const n = parsePart(part);
+      if (n != null) ports.push(n);
+    }
+  }
+
+  return [...new Set(ports)];
+}
+
+const listenPorts = parseListenPorts();
+
 export const config = {
-  port: Number(process.env.EUTERPE_PORT || 8000),
+  ports: listenPorts.length ? listenPorts : [8000],
+  port: (listenPorts.length ? listenPorts : [8000])[0],
   secret: process.env.EUTERPE_SECRET || "change-me-in-production",
   dataDir: process.env.EUTERPE_DATA_DIR || path.join(root, "data"),
   audioDir: process.env.EUTERPE_AUDIO_DIR || path.join(root, "data", "audio"),

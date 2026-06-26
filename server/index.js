@@ -69,11 +69,30 @@ try {
   console.warn(`Audio engine not available (${config.mpvPath}):`, err.message);
 }
 
-server.listen(config.port, () => {
-  console.log(`Euterpe running on http://localhost:${config.port}`);
-}).on("error", (err) => {
-  console.error(`Kan poort ${config.port} niet openen:`, err.message);
-  process.exit(1);
+let boundPorts = 0;
+
+function onListen(port) {
+  boundPorts += 1;
+  console.log(`Euterpe running on http://localhost:${port}`);
+}
+
+function onListenError(port, err) {
+  if (port === config.port) {
+    console.error(`Kan primaire poort ${port} niet openen:`, err.message);
+    process.exit(1);
+  }
+  console.warn(`Extra poort ${port} niet beschikbaar:`, err.message);
+}
+
+for (const port of config.ports) {
+  server.listen(port, () => onListen(port)).on("error", (err) => onListenError(port, err));
+}
+
+setImmediate(() => {
+  if (boundPorts === 0) {
+    console.error("Geen HTTP-poort gebonden");
+    process.exit(1);
+  }
 });
 
 process.on("SIGINT", async () => {

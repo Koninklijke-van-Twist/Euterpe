@@ -147,7 +147,9 @@ Afspeellijsten worden geshuffeld. Na het laatste nummer: opnieuw shufflen. De la
 
 | Variabele | Standaard | Beschrijving |
 |-----------|-----------|--------------|
-| `EUTERPE_PORT` | `8000` | HTTP-poort |
+| `EUTERPE_PORT` | `8000` | Primaire HTTP-poort |
+| `EUTERPE_PORTS` | — | Komma-gescheiden lijst (bijv. `8000,80`); overschrijft `EUTERPE_PORT` |
+| `EUTERPE_EXTRA_PORTS` | — | Extra poorten naast `EUTERPE_PORT` (bijv. `80`) |
 | `EUTERPE_SECRET` | `change-me-in-production` | (reserved) |
 | `EUTERPE_DATA_DIR` | `./data` | Data-map |
 | `EUTERPE_MPV_PATH` | `mpvnet` (Windows) / `mpv` (Linux) | Pad naar mpv of mpvnet |
