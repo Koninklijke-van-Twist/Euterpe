@@ -1,0 +1,14 @@
+# Local dev config
+.env
+
+# Runtime data — preserved across git reset/pull
+data/audio/
+data/store.json
+data/mpv.sock
+
+# Dependencies (if ever added)
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db

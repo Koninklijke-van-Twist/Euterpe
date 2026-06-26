@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Euterpe — Headless Audio Player</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Source+Sans+3:wght@300;400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="site-header">
+      <div class="hero-logo-wrap">
+        <div class="hero-logo-glow" aria-hidden="true"></div>
+        <img src="/euterpe-logo-large.png" alt="Euterpe" class="hero-logo" />
+      </div>
+    </header>
+
+    <section class="panel now-playing" id="player">
+      <span id="status-badge" class="status-badge stopped">Gestopt</span>
+      <p id="track-title" class="track-title muted">Geen nummer actief</p>
+      <p id="track-artist" class="track-artist"></p>
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+      <div class="time-row">
+        <span id="time-pos">0:00</span>
+        <span id="time-dur">0:00</span>
+      </div>
+      <div class="controls">
+        <button class="btn-icon" id="btn-stop" title="Stop">⏹</button>
+        <button class="btn-icon play" id="btn-play" title="Afspelen">▶</button>
+        <button class="btn-icon" id="btn-skip" title="Overslaan">⏭</button>
+      </div>
+      <div class="volume-row">
+        <span>🔊</span>
+        <input type="range" id="volume" min="0" max="100" value="75" />
+        <span id="volume-label">75%</span>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Bibliotheek</h2>
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="file-input" accept="audio/*" multiple hidden />
+          Sleep audiobestanden hierheen of klik om te uploaden
+        </div>
+        <ul class="track-list" id="track-list"></ul>
+      </section>
+      <section class="panel">
+        <h2>Wachtrij</h2>
+        <ul class="track-list" id="queue-list"></ul>
+      </section>
+    </div>
+
+    <section class="panel section-spaced">
+      <h2>Afspeellijsten</h2>
+      <div class="playlist-create">
+        <input id="playlist-name" placeholder="Nieuwe afspeellijst…" />
+        <button class="btn-primary" id="playlist-create-btn">Aanmaken</button>
+      </div>
+      <div id="playlist-list" class="playlist-editor"></div>
+      <div id="playlist-editor" class="hidden panel inner-panel"></div>
+    </section>
+
+    <footer class="site-footer">
+      <button class="btn-secondary restart" id="restart-btn" title="Sluit server af — run.sh herstart en update">Herstart</button>
+    </footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

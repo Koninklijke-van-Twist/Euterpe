@@ -1,0 +1,30 @@
+[Unit]
+Description=Euterpe headless audio player
+Documentation=https://github.com/your-org/Euterpe
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+WorkingDirectory=@INSTALL_DIR@
+ExecStart=@INSTALL_DIR@/scripts/run.sh
+
+# run.sh loopt zelf; dit vangt crashes van het wrapper-script
+Restart=always
+RestartSec=5
+
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Configuratie: /etc/euterpe/env (aangemaakt door install-service.sh)
+EnvironmentFile=-/etc/euterpe/env
+Environment=NODE_ENV=production
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=euterpe
+
+[Install]
+WantedBy=multi-user.target

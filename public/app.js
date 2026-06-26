@@ -1,0 +1,276 @@
+let tracks = [];
+let playlists = [];
+let status = null;
+let editingPlaylist = null;
+let selectedTrackIds = [];
+let eventSource = null;
+
+const $ = (id) => document.getElementById(id);
+
+function formatTime(s) {
+  if (!s || !Number.isFinite(s)) return "0:00";
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+function formatBytes(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (!(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  const res = await fetch(path, { ...options, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Request failed");
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function connectEvents() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource("/api/events");
+  eventSource.onmessage = (e) => {
+    status = JSON.parse(e.data);
+    renderPlayer();
+    renderQueue();
+  };
+}
+
+function renderPlayer() {
+  if (!status) return;
+  const badge = $("status-badge");
+  badge.className = `status-badge ${status.state}`;
+  badge.textContent = status.state === "playing" ? "Afspelen" : status.state === "paused" ? "Gepauzeerd" : "Gestopt";
+
+  const track = status.current_track;
+  $("track-title").textContent = track ? track.title : "Geen nummer actief";
+  $("track-title").classList.toggle("muted", !track);
+  $("track-artist").textContent = track ? (track.artist || "Onbekende artiest") : "";
+
+  const pct = status.duration > 0 ? (status.position / status.duration) * 100 : 0;
+  $("progress-fill").style.width = `${pct}%`;
+  $("time-pos").textContent = formatTime(status.position);
+  $("time-dur").textContent = formatTime(status.duration);
+  $("volume").value = status.volume;
+  $("volume-label").textContent = `${Math.round(status.volume)}%`;
+  $("btn-play").textContent = status.state === "playing" ? "⏸" : "▶";
+}
+
+function renderTracks() {
+  const list = $("track-list");
+  if (!tracks.length) {
+    list.innerHTML = '<li class="empty-state">Nog geen nummers geüpload</li>';
+    return;
+  }
+  list.innerHTML = tracks.map((t) => `
+    <li>
+      <div class="track-info">
+        <div class="title">${esc(t.title)}</div>
+        <div class="meta">${esc(t.artist || "Onbekend")} · ${formatTime(t.duration)} · ${formatBytes(t.file_size)}</div>
+      </div>
+      <div class="track-actions">
+        <button class="btn-small" data-queue="${t.id}">+ Wachtrij</button>
+        <button class="btn-danger" data-delete-track="${t.id}">✕</button>
+      </div>
+    </li>
+  `).join("");
+}
+
+function renderQueue() {
+  const list = $("queue-list");
+  const queue = status?.queue || [];
+  if (!queue.length) {
+    list.innerHTML = '<li class="empty-state">Wachtrij is leeg</li>';
+    return;
+  }
+  list.innerHTML = queue.map((item, i) => `
+    <li>
+      <div class="track-info">
+        <div class="title">${i + 1}. ${esc(item.track.title)}</div>
+        <div class="meta">${esc(item.track.artist || "Onbekend")} · ${formatTime(item.track.duration)}</div>
+      </div>
+      <button class="btn-danger" data-remove-queue="${item.id}">✕</button>
+    </li>
+  `).join("");
+}
+
+function renderPlaylists() {
+  const container = $("playlist-list");
+  if (!playlists.length) {
+    container.innerHTML = '<p class="empty-state">Nog geen afspeellijsten</p>';
+    return;
+  }
+  container.innerHTML = playlists.map((pl) => `
+    <div class="playlist-item">
+      <div>
+        <strong>${esc(pl.name)}</strong>
+        <div class="muted" style="font-size:0.85rem">${pl.tracks.length} nummers</div>
+      </div>
+      <div class="track-actions">
+        <button class="btn-small" data-play-pl="${pl.id}">▶ Shuffle</button>
+        <button class="btn-small" data-edit-pl="${pl.id}">Bewerken</button>
+        <button class="btn-danger" data-delete-pl="${pl.id}">✕</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderPlaylistEditor() {
+  const editor = $("playlist-editor");
+  if (!editingPlaylist) { editor.classList.add("hidden"); return; }
+  editor.classList.remove("hidden");
+  editor.innerHTML = `
+    <h3>Bewerk: ${esc(editingPlaylist.name)}</h3>
+    <ul class="track-list editor-list">
+      ${tracks.map((t) => `
+        <li>
+          <label class="checkbox-row">
+            <input type="checkbox" data-pl-track="${t.id}" ${selectedTrackIds.includes(t.id) ? "checked" : ""} />
+            <div class="track-info">
+              <div class="title">${esc(t.title)}</div>
+              <div class="meta">${esc(t.artist || "Onbekend")}</div>
+            </div>
+          </label>
+        </li>
+      `).join("")}
+    </ul>
+    <div class="track-actions editor-actions">
+      <button class="btn-primary" id="save-pl-edit">Opslaan</button>
+      <button class="btn-secondary" id="cancel-pl-edit">Annuleren</button>
+    </div>
+  `;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+async function loadData() {
+  [tracks, playlists, status] = await Promise.all([
+    api("/api/tracks"),
+    api("/api/playlists"),
+    api("/api/playback/status"),
+  ]);
+  renderTracks();
+  renderPlaylists();
+  renderPlayer();
+  renderQueue();
+}
+
+$("restart-btn").addEventListener("click", async () => {
+  if (!confirm("Server afsluiten? run.sh doet daarna git pull en start de service opnieuw.")) return;
+  try {
+    await api("/api/admin/restart", { method: "POST" });
+  } catch {
+    /* server may close before response completes */
+  }
+  $("restart-btn").textContent = "Herstarten…";
+  $("restart-btn").disabled = true;
+});
+
+$("btn-play").addEventListener("click", async () => {
+  if (status?.state === "playing") await api("/api/playback/pause", { method: "POST" });
+  else await api("/api/playback/play", { method: "POST" });
+});
+$("btn-stop").addEventListener("click", () => api("/api/playback/stop", { method: "POST" }));
+$("btn-skip").addEventListener("click", () => api("/api/playback/skip", { method: "POST" }));
+$("volume").addEventListener("input", (e) => {
+  const v = Number(e.target.value);
+  $("volume-label").textContent = `${v}%`;
+  api("/api/playback/volume", { method: "PUT", body: JSON.stringify({ volume: v }) });
+});
+
+const uploadZone = $("upload-zone");
+const fileInput = $("file-input");
+uploadZone.addEventListener("click", () => fileInput.click());
+uploadZone.addEventListener("dragover", (e) => { e.preventDefault(); uploadZone.classList.add("dragover"); });
+uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("dragover"));
+uploadZone.addEventListener("drop", (e) => {
+  e.preventDefault();
+  uploadZone.classList.remove("dragover");
+  uploadFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener("change", (e) => uploadFiles(e.target.files));
+
+async function uploadFiles(files) {
+  for (const file of files) {
+    const form = new FormData();
+    form.append("file", file);
+    await api("/api/tracks/upload", { method: "POST", body: form });
+  }
+  tracks = await api("/api/tracks");
+  renderTracks();
+}
+
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement)) return;
+
+  if (t.dataset.queue) {
+    await api("/api/queue", { method: "POST", body: JSON.stringify({ track_id: Number(t.dataset.queue) }) });
+    status = await api("/api/playback/status");
+    renderQueue();
+  }
+  if (t.dataset.deleteTrack) {
+    await api(`/api/tracks/${t.dataset.deleteTrack}`, { method: "DELETE" });
+    await loadData();
+  }
+  if (t.dataset.removeQueue) {
+    await api(`/api/queue/${t.dataset.removeQueue}`, { method: "DELETE" });
+    status = await api("/api/playback/status");
+    renderQueue();
+  }
+  if (t.dataset.playPl) {
+    await api(`/api/playlists/${t.dataset.playPl}/play`, { method: "POST" });
+  }
+  if (t.dataset.editPl) {
+    editingPlaylist = playlists.find((p) => p.id === Number(t.dataset.editPl));
+    selectedTrackIds = editingPlaylist.tracks.map((t) => t.track.id);
+    renderPlaylistEditor();
+  }
+  if (t.dataset.deletePl) {
+    await api(`/api/playlists/${t.dataset.deletePl}`, { method: "DELETE" });
+    playlists = await api("/api/playlists");
+    renderPlaylists();
+  }
+  if (t.id === "save-pl-edit") {
+    await api(`/api/playlists/${editingPlaylist.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ track_ids: selectedTrackIds }),
+    });
+    editingPlaylist = null;
+    playlists = await api("/api/playlists");
+    renderPlaylists();
+    renderPlaylistEditor();
+  }
+  if (t.id === "cancel-pl-edit") {
+    editingPlaylist = null;
+    renderPlaylistEditor();
+  }
+});
+
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t instanceof HTMLInputElement && t.dataset.plTrack) {
+    const id = Number(t.dataset.plTrack);
+    if (t.checked) selectedTrackIds.push(id);
+    else selectedTrackIds = selectedTrackIds.filter((x) => x !== id);
+  }
+});
+
+$("playlist-create-btn").addEventListener("click", async () => {
+  const name = $("playlist-name").value.trim();
+  if (!name) return;
+  await api("/api/playlists", { method: "POST", body: JSON.stringify({ name }) });
+  $("playlist-name").value = "";
+  playlists = await api("/api/playlists");
+  renderPlaylists();
+});
+
+loadData().then(connectEvents);

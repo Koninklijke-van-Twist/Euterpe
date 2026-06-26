@@ -1,0 +1,13 @@
+{
+  "name": "euterpe",
+  "version": "1.0.0",
+  "description": "Headless audio player — Node.js + vanilla web UI, zero npm dependencies",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
