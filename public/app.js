@@ -4,6 +4,7 @@ let trashTracks = [];
 let status = null;
 let editingPlaylist = null;
 let selectedTrackIds = [];
+let playlistPickerTrackId = null;
 let eventSource = null;
 let suppressQueueSseUntil = 0;
 
@@ -122,6 +123,7 @@ function renderTracks() {
         <div class="meta">${esc(t.artist || "Onbekend")} · ${formatTime(t.duration)} · ${formatBytes(t.file_size)}</div>
       </div>
       <div class="track-actions">
+        <button type="button" class="btn-small btn-add-playlist" data-add-to-playlists="${t.id}" title="Toevoegen aan afspeellijst">+</button>
         <button class="btn-small" data-queue="${t.id}" ${manualBlocked ? 'disabled title="Stop de afspeellijst met ⏹"' : ""}>▶</button>
         <button class="btn-danger" data-delete-track="${t.id}">✕</button>
       </div>
@@ -234,6 +236,71 @@ function closeTrashModal() {
   $("trash-modal").classList.add("hidden");
 }
 
+function playlistTrackIds(playlist) {
+  return playlist.tracks.map((entry) => entry.track.id);
+}
+
+function renderPlaylistPickerModal() {
+  const list = $("playlist-picker-list");
+  const track = tracks.find((t) => t.id === playlistPickerTrackId);
+  $("playlist-picker-track").textContent = track
+    ? `${track.title}${track.artist ? ` — ${track.artist}` : ""}`
+    : "";
+  if (!playlists.length) {
+    list.innerHTML = '<li class="empty-state">Nog geen afspeellijsten — maak er eerst een aan</li>';
+    return;
+  }
+  list.innerHTML = playlists.map((pl) => {
+    const checked = playlistTrackIds(pl).includes(playlistPickerTrackId);
+    return `
+      <li>
+        <label class="checkbox-row">
+          <input type="checkbox" data-pl-picker="${pl.id}" ${checked ? "checked" : ""} />
+          <span>${esc(pl.name)}</span>
+          <span class="muted" style="font-size:0.85rem;margin-left:auto">${pl.tracks.length} nummers</span>
+        </label>
+      </li>
+    `;
+  }).join("");
+}
+
+function openPlaylistPicker(trackId) {
+  playlistPickerTrackId = trackId;
+  renderPlaylistPickerModal();
+  $("playlist-picker-modal").classList.remove("hidden");
+}
+
+function closePlaylistPicker() {
+  playlistPickerTrackId = null;
+  $("playlist-picker-modal").classList.add("hidden");
+}
+
+async function toggleTrackInPlaylist(playlistId, checked) {
+  const trackId = playlistPickerTrackId;
+  if (!trackId) return;
+  try {
+    if (checked) {
+      await api(`/api/playlists/${playlistId}/tracks`, {
+        method: "POST",
+        body: JSON.stringify({ track_id: trackId }),
+      });
+    } else {
+      await api(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" });
+    }
+    playlists = await api("/api/playlists");
+    if (editingPlaylist?.id === playlistId) {
+      editingPlaylist = playlists.find((p) => p.id === playlistId) || null;
+      if (editingPlaylist) selectedTrackIds = playlistTrackIds(editingPlaylist);
+      renderPlaylistEditor();
+    }
+    renderPlaylists();
+    renderPlaylistPickerModal();
+  } catch (err) {
+    renderPlaylistPickerModal();
+    await showAlert(err.message || "Afspeellijst bijwerken mislukt");
+  }
+}
+
 async function loadTrash() {
   trashTracks = await api("/api/tracks/trash");
   renderTrashModal();
@@ -327,6 +394,9 @@ $("trash-btn").addEventListener("click", async () => {
 $("trash-modal-close").addEventListener("click", closeTrashModal);
 $("trash-modal-backdrop").addEventListener("click", closeTrashModal);
 
+$("playlist-picker-close").addEventListener("click", closePlaylistPicker);
+$("playlist-picker-backdrop").addEventListener("click", closePlaylistPicker);
+
 $("restart-btn").addEventListener("click", async () => {
   const ok = await showConfirm(
     "Server afsluiten? run.sh doet daarna git pull en start de service opnieuw.",
@@ -412,6 +482,12 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
+  const addToPlEl = clickTarget(e, "[data-add-to-playlists]");
+  if (addToPlEl?.dataset.addToPlaylists) {
+    openPlaylistPicker(Number(addToPlEl.dataset.addToPlaylists));
+    return;
+  }
+
   const queueAddEl = clickTarget(e, "[data-queue]");
   if (queueAddEl?.dataset.queue) {
     if (isPlaylistMode()) {
@@ -493,6 +569,10 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("change", (e) => {
   const t = e.target;
+  if (t instanceof HTMLInputElement && t.dataset.plPicker) {
+    toggleTrackInPlaylist(Number(t.dataset.plPicker), t.checked);
+    return;
+  }
   if (t instanceof HTMLInputElement && t.dataset.plTrack) {
     const id = Number(t.dataset.plTrack);
     if (t.checked) selectedTrackIds.push(id);

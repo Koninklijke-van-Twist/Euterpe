@@ -101,6 +101,18 @@
     </div>
   </div>
 
-  <script src="/app.js?v=8"></script>
+  <div id="playlist-picker-modal" class="modal hidden" role="dialog" aria-labelledby="playlist-picker-title" aria-modal="true">
+    <div class="modal-backdrop" id="playlist-picker-backdrop"></div>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 id="playlist-picker-title">Toevoegen aan afspeellijst</h2>
+        <button type="button" class="btn-icon modal-close" id="playlist-picker-close" title="Sluiten">✕</button>
+      </div>
+      <p id="playlist-picker-track" class="modal-hint"></p>
+      <ul class="track-list modal-list" id="playlist-picker-list"></ul>
+    </div>
+  </div>
+
+  <script src="/app.js?v=9"></script>
 </body>
 </html>

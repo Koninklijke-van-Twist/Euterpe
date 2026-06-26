@@ -7,6 +7,13 @@ import { shouldAutoPlayOnEnqueue, assertManualQueueAllowed, formatQueueItem } fr
 import { readStore, updateStore } from "./store.js";
 import { getCachedCommitSha } from "./version.js";
 import {
+  addTrackToPlaylist,
+  dedupeTrackIds,
+  parsePlaylistTrackAdd,
+  parsePlaylistTrackDelete,
+  removeTrackFromPlaylist,
+} from "./playlist-helpers.js";
+import {
   activeTracks,
   daysUntilPurge,
   moveTrackToTrash,
@@ -300,7 +307,7 @@ export async function handleApi(req, res, url) {
       if (!p) throw Object.assign(new Error("Not found"), { status: 404 });
       if (body.name != null) p.name = body.name;
       if (body.description != null) p.description = body.description;
-      if (body.track_ids != null) p.trackIds = body.track_ids;
+      if (body.track_ids != null) p.trackIds = dedupeTrackIds(body.track_ids);
       p.updatedAt = new Date().toISOString();
       return p;
     }).catch((err) => {
@@ -312,7 +319,53 @@ export async function handleApi(req, res, url) {
     return json(res, 200, playlistOut(store, updated));
   }
 
-  if (method === "DELETE" && pathname.startsWith("/api/playlists/")) {
+  const playlistTrackDelete = method === "DELETE" ? parsePlaylistTrackDelete(pathname) : null;
+  if (playlistTrackDelete) {
+    const { playlistId, trackId } = playlistTrackDelete;
+    const updated = await updateStore((store) => {
+      const p = store.playlists.find((pl) => pl.id === playlistId);
+      if (!p) throw Object.assign(new Error("Not found"), { status: 404 });
+      if (!store.tracks.some((t) => t.id === trackId && !t.deleted_at)) {
+        throw Object.assign(new Error("Track not found"), { status: 404 });
+      }
+      removeTrackFromPlaylist(p, trackId);
+      p.updatedAt = new Date().toISOString();
+      return p;
+    }).catch((err) => {
+      json(res, err.status || 500, { detail: err.message });
+      return null;
+    });
+    if (!updated) return;
+    const store = await readStore();
+    return json(res, 200, playlistOut(store, updated));
+  }
+
+  const playlistTrackAddId = method === "POST" ? parsePlaylistTrackAdd(pathname) : null;
+  if (playlistTrackAddId) {
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const trackId = Number(body.track_id);
+    if (!Number.isFinite(trackId)) {
+      return json(res, 400, { detail: "track_id required" });
+    }
+    const updated = await updateStore((store) => {
+      const p = store.playlists.find((pl) => pl.id === playlistTrackAddId);
+      if (!p) throw Object.assign(new Error("Not found"), { status: 404 });
+      if (!store.tracks.some((t) => t.id === trackId && !t.deleted_at)) {
+        throw Object.assign(new Error("Track not found"), { status: 404 });
+      }
+      addTrackToPlaylist(p, trackId);
+      p.updatedAt = new Date().toISOString();
+      return p;
+    }).catch((err) => {
+      json(res, err.status || 500, { detail: err.message });
+      return null;
+    });
+    if (!updated) return;
+    const store = await readStore();
+    return json(res, 200, playlistOut(store, updated));
+  }
+
+  if (method === "DELETE" && pathname.match(/^\/api\/playlists\/\d+$/)) {
     const id = Number(pathname.split("/")[3]);
     try {
       await updateStore((store) => {

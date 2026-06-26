@@ -507,6 +507,25 @@ input:focus {
 .inner-panel { margin-top: 1rem; background: var(--bg-elevated); border: 1px solid var(--border); }
 .btn-secondary.restart { border-color: var(--gold-dim); color: var(--gold); font-weight: 600; }
 
+.modal-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.modal-list .checkbox-row {
+  padding: 0.35rem 0;
+}
+
+.btn-add-playlist {
+  font-weight: 600;
+  min-width: 2rem;
+}
+
 .checkbox-row { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; flex: 1; }
+
 .editor-list { max-height: 240px; }
 .editor-actions { margin-top: 0.75rem; }
