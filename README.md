@@ -173,6 +173,19 @@ Afspeellijsten worden geshuffeld. Na het laatste nummer: opnieuw shufflen. De la
 | `EUTERPE_SECRET` | `change-me-in-production` | (reserved) |
 | `EUTERPE_DATA_DIR` | `./data` | Data-map |
 | `EUTERPE_MPV_PATH` | `mpvnet` (Windows) / `mpv` (Linux) | Pad naar mpv of mpvnet |
+| `EUTERPE_MPV_AO` | `alsa` (Linux) / mpv-default (Windows) | Audio-output (`alsa`, `pulse`, …). Leeg = mpv kiest zelf |
+| `EUTERPE_MPV_EXTRA_ARGS` | — | Extra mpv-flags, spaties gescheiden |
+
+### Audio op Linux (systemd)
+
+mpv probeert soms **PipeWire** via OpenAL Soft. Onder een systemd-service is PipeWire vaak niet bereikbaar → logregel zoals `Failed to connect PipeWire event context (errno: 112)`. Dat is meestal onschuldig als geluid werkt; Euterpe zet op Linux standaard `--ao=alsa`.
+
+Als er geen geluid is:
+
+1. Controleer geluidskaart: `aplay -l` en test met `speaker-test -t wav -c 2`
+2. Zet in `/etc/euterpe/env`: `EUTERPE_MPV_AO=alsa` (of `pulse` als je PulseAudio gebruikt)
+3. Herstart: `sudo systemctl restart euterpe`
+4. Service-user moet in de `audio`-groep zitten als je niet als root draait
 
 ## Licentie
 

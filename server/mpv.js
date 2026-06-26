@@ -4,6 +4,7 @@ import net from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { config } from "./config.js";
+import { buildMpvArgs, isBenignMpvStderr } from "./mpv-args.js";
 
 class MPVClient {
   constructor() {
@@ -50,19 +51,12 @@ class MPVClient {
   }
 
   mpvArgs(ipc) {
-    const args = [
-      // mpv.net: eigen proces + IPC-pipe (niet de bestaande GUI-instantie)
-      ...(config.isWindows ? ["--process-instance=multi"] : []),
-      "--idle=yes",
-      "--keep-open=yes",
-      "--loop-file=no",
-      "--loop-playlist=no",
-      `--input-ipc-server=${ipc}`,
-      "--volume=75",
-      "--no-video",
-      "--force-window=no",
-    ];
-    return args;
+    return buildMpvArgs({
+      ipc,
+      isWindows: config.isWindows,
+      mpvAo: config.mpvAo,
+      mpvExtraArgs: config.mpvExtraArgs,
+    });
   }
 
   async start() {
@@ -83,7 +77,8 @@ class MPVClient {
 
     this.process.stderr?.on("data", (chunk) => {
       const msg = chunk.toString("utf8").trim();
-      if (msg) console.error(`[${config.mpvPath}]`, msg);
+      if (!msg || isBenignMpvStderr(msg)) return;
+      console.error(`[${config.mpvPath}]`, msg);
     });
 
     this.process.on("exit", (code) => {

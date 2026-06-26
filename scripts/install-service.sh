@@ -47,6 +47,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 # EUTERPE_EXTRA_PORTS=80
 # EUTERPE_DATA_DIR=${ROOT}/data
 # EUTERPE_MPV_PATH=mpv
+# EUTERPE_MPV_AO=alsa
 EOF
   chmod 640 "${ENV_FILE}"
   chown root:"${SERVICE_USER}" "${ENV_FILE}" 2>/dev/null || true

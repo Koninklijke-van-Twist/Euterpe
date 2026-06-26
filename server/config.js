@@ -89,6 +89,20 @@ export function parseListenPorts(env = process.env) {
   return [...new Set(ports)];
 }
 
+function resolveMpvAo() {
+  if (process.env.EUTERPE_MPV_AO !== undefined) {
+    const v = process.env.EUTERPE_MPV_AO.trim();
+    return v || null;
+  }
+  return process.platform === "win32" ? null : "alsa";
+}
+
+function resolveMpvExtraArgs() {
+  const raw = process.env.EUTERPE_MPV_EXTRA_ARGS;
+  if (!raw?.trim()) return [];
+  return raw.trim().split(/\s+/);
+}
+
 const listenPorts = parseListenPorts();
 
 export const config = {
@@ -98,6 +112,8 @@ export const config = {
   dataDir: process.env.EUTERPE_DATA_DIR || path.join(root, "data"),
   audioDir: process.env.EUTERPE_AUDIO_DIR || path.join(root, "data", "audio"),
   mpvPath: resolveMpvPath(),
+  mpvAo: resolveMpvAo(),
+  mpvExtraArgs: resolveMpvExtraArgs(),
   mpvSocket: process.env.EUTERPE_MPV_SOCKET || path.join(root, "data", "mpv.sock"),
   publicDir: path.join(root, "public"),
   isWindows: process.platform === "win32",
