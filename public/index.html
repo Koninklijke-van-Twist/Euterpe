@@ -53,6 +53,7 @@
       </section>
       <section class="panel">
         <h2>Wachtrij</h2>
+        <p id="playlist-mode-hint" class="playlist-mode-hint hidden"></p>
         <ul class="track-list" id="queue-list"></ul>
       </section>
     </div>
@@ -84,6 +85,21 @@
     </div>
   </div>
 
-  <script src="/app.js?v=3"></script>
+  <div id="dialog-modal" class="modal hidden" role="alertdialog" aria-labelledby="dialog-title" aria-describedby="dialog-message" aria-modal="true">
+    <div class="modal-backdrop" id="dialog-modal-backdrop"></div>
+    <div class="modal-panel dialog-panel">
+      <div class="modal-header">
+        <h2 id="dialog-title">Melding</h2>
+      </div>
+      <p id="dialog-message" class="dialog-message"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn-secondary hidden" id="dialog-cancel">Annuleren</button>
+        <button type="button" class="btn-primary hidden" id="dialog-confirm">Bevestigen</button>
+        <button type="button" class="btn-primary hidden" id="dialog-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js?v=7"></script>
 </body>
 </html>

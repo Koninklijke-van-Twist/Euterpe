@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  assertManualQueueAllowed,
+  countPlayableQueueItems,
+  formatQueueItem,
   isIdlePlayback,
+  normalizeQueueIds,
   popNextFromQueue,
+  pruneOrphanQueueItems,
   removeQueueItemAndAbove,
   removeQueueItemById,
   shouldAutoPlayOnEnqueue,
@@ -48,7 +53,7 @@ describe("queue-helpers", () => {
   });
 
   it("shouldAutoPlayOnEnqueue when idle and queue empty", () => {
-    const store = makeStore();
+    const store = makeStore({ tracks: [makeTrack(1)] });
     assert.equal(shouldAutoPlayOnEnqueue(store), true);
 
     store.queue.push({ id: 1, trackId: 1, position: 0 });
@@ -61,6 +66,32 @@ describe("queue-helpers", () => {
     store.playback.currentTrackId = null;
     store.playback.state = "playing";
     assert.equal(shouldAutoPlayOnEnqueue(store), false);
+  });
+
+  it("shouldAutoPlayOnEnqueue ignores orphan queue entries", () => {
+    const store = makeStore({
+      tracks: [makeTrack(1)],
+      queue: [{ id: 1, trackId: 99, position: 0 }],
+    });
+    assert.equal(countPlayableQueueItems(store), 0);
+    assert.equal(shouldAutoPlayOnEnqueue(store), true);
+    assert.equal(store.queue.length, 0);
+  });
+
+  it("pruneOrphanQueueItems removes missing tracks", () => {
+    const store = makeStore({
+      tracks: [makeTrack(10)],
+      queue: [
+        { id: 1, trackId: 10, position: 0 },
+        { id: 2, trackId: 99, position: 1 },
+      ],
+    });
+    assert.equal(pruneOrphanQueueItems(store), true);
+    assert.deepEqual(
+      store.queue.map((q) => q.trackId),
+      [10]
+    );
+    assert.equal(store.queue[0].position, 0);
   });
 
   it("removeQueueItemById removes single entry", () => {
@@ -96,5 +127,50 @@ describe("queue-helpers", () => {
     assert.equal(isIdlePlayback(store), true);
     store.playback.state = "paused";
     assert.equal(isIdlePlayback(store), false);
+  });
+
+  it("shouldAutoPlayOnEnqueue blocked in playlist mode", () => {
+    const store = makeStore({ playback: { activePlaylistId: 2, state: "stopped" } });
+    assert.equal(shouldAutoPlayOnEnqueue(store), true);
+    assert.throws(() => assertManualQueueAllowed(store));
+  });
+
+  it("formatQueueItem exposes queue_id separate from track id", () => {
+    const store = makeStore({
+      tracks: [makeTrack(9)],
+      queue: [{ id: 120, trackId: 9, position: 0, addedAt: "2026-01-01T00:00:00.000Z" }],
+    });
+    const out = formatQueueItem(store, store.queue[0]);
+    assert.equal(out.queue_id, 120);
+    assert.equal(out.track_id, 9);
+    assert.equal(out.track.id, 9);
+  });
+
+  it("removeQueueItemById targets queue id when same track appears twice", () => {
+    const store = makeStore({
+      queue: [
+        { id: 10, trackId: 9, position: 0 },
+        { id: 11, trackId: 9, position: 1 },
+      ],
+    });
+    assert.equal(removeQueueItemById(store, 11), true);
+    assert.deepEqual(
+      store.queue.map((q) => q.id),
+      [10]
+    );
+  });
+
+  it("normalizeQueueIds fixes duplicate queue ids", () => {
+    const store = makeStore({
+      meta: { nextTrackId: 1, nextQueueId: 12, nextPlaylistId: 1 },
+      queue: [
+        { id: 9, trackId: 9, position: 0 },
+        { id: 9, trackId: 9, position: 1 },
+      ],
+    });
+    assert.equal(normalizeQueueIds(store), true);
+    assert.equal(store.queue[0].id, 9);
+    assert.equal(store.queue[1].id, 12);
+    assert.equal(store.meta.nextQueueId, 13);
   });
 });

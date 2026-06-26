@@ -210,10 +210,28 @@ class MPVClient {
       throw new Error(`Bestand niet gevonden: ${resolved}`);
     }
     const uri = pathToFileURL(resolved).href;
+    const fileName = path.basename(resolved).toLowerCase();
     console.log(`loadfile: ${uri}`);
     const loaded = this.onceEvent((e) => e.event === "file-loaded");
     await this.command("loadfile", uri, "replace");
-    await loaded;
+    try {
+      await loaded;
+    } catch {
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        try {
+          const mpvPath = String((await this.getProperty("path")) ?? "").toLowerCase();
+          if (mpvPath.includes(fileName)) return;
+        } catch {
+          /* mpv busy */
+        }
+      }
+      throw new Error("Audio engine laadde het bestand niet op tijd");
+    }
+  }
+
+  async seek(seconds, mode = "absolute") {
+    await this.command("seek", seconds, mode);
   }
 
   async pause(paused = true) {

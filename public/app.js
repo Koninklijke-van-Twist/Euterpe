@@ -7,13 +7,45 @@ let selectedTrackIds = [];
 let eventSource = null;
 let suppressQueueSseUntil = 0;
 
-function suppressQueueSse(ms = 2000) {
+function isPlaylistMode() {
+  return status?.active_playlist_id != null;
+}
+
+function queueItemId(item) {
+  return item.queue_id ?? item.id;
+}
+
+function queueSignature(queue = []) {
+  return queue.map((item) => queueItemId(item)).join(",");
+}
+
+function applyStatus(incoming) {
+  if (Date.now() < suppressQueueSseUntil) {
+    if (!status) return;
+    incoming = { ...incoming, queue: status.queue };
+  }
+
+  const playlistChanged =
+    status?.active_playlist_id !== incoming.active_playlist_id ||
+    status?.active_playlist_name !== incoming.active_playlist_name;
+  const queueChanged = queueSignature(status?.queue) !== queueSignature(incoming.queue);
+
+  status = incoming;
+  renderPlayer();
+  if (playlistChanged || queueChanged) {
+    renderTracks();
+    renderQueue();
+  }
+}
+
+function suppressQueueSse(ms = 3000) {
   suppressQueueSseUntil = Date.now() + ms;
 }
 
 async function refreshPlaybackUi() {
   status = await api("/api/playback/status");
   renderPlayer();
+  renderTracks();
   renderQueue();
 }
 
@@ -47,18 +79,19 @@ async function api(path, options = {}) {
 function connectEvents() {
   if (eventSource) eventSource.close();
   eventSource = new EventSource("/api/events");
-  eventSource.onmessage = (e) => {
-    status = JSON.parse(e.data);
-    renderPlayer();
-    if (Date.now() >= suppressQueueSseUntil) renderQueue();
-  };
+  eventSource.onmessage = (e) => applyStatus(JSON.parse(e.data));
 }
 
 function renderPlayer() {
   if (!status) return;
   const badge = $("status-badge");
-  badge.className = `status-badge ${status.state}`;
-  badge.textContent = status.state === "playing" ? "Afspelen" : status.state === "paused" ? "Gepauzeerd" : "Gestopt";
+  const playlistActive = isPlaylistMode();
+  badge.className = `status-badge ${status.state}${playlistActive ? " playlist" : ""}`;
+  if (playlistActive) {
+    badge.textContent = `Afspeellijst · ${status.active_playlist_name || "actief"}`;
+  } else {
+    badge.textContent = status.state === "playing" ? "Afspelen" : status.state === "paused" ? "Gepauzeerd" : "Gestopt";
+  }
 
   const track = status.current_track;
   $("track-title").textContent = track ? track.title : "Geen nummer actief";
@@ -72,10 +105,12 @@ function renderPlayer() {
   $("volume").value = status.volume;
   $("volume-label").textContent = `${Math.round(status.volume)}%`;
   $("btn-play").textContent = status.state === "playing" ? "⏸" : "▶";
+  $("btn-stop").title = playlistActive ? "Stop afspeellijst" : "Stop";
 }
 
 function renderTracks() {
   const list = $("track-list");
+  const manualBlocked = isPlaylistMode();
   if (!tracks.length) {
     list.innerHTML = '<li class="empty-state">Nog geen nummers geüpload</li>';
     return;
@@ -87,7 +122,7 @@ function renderTracks() {
         <div class="meta">${esc(t.artist || "Onbekend")} · ${formatTime(t.duration)} · ${formatBytes(t.file_size)}</div>
       </div>
       <div class="track-actions">
-        <button class="btn-small" data-queue="${t.id}">▶</button>
+        <button class="btn-small" data-queue="${t.id}" ${manualBlocked ? 'disabled title="Stop de afspeellijst met ⏹"' : ""}>▶</button>
         <button class="btn-danger" data-delete-track="${t.id}">✕</button>
       </div>
     </li>
@@ -96,9 +131,20 @@ function renderTracks() {
 
 function renderQueue() {
   const list = $("queue-list");
+  const hint = $("playlist-mode-hint");
+  const playlistActive = isPlaylistMode();
+  if (playlistActive) {
+    hint.textContent = `Afspeellijst «${status.active_playlist_name || "actief"}» — Druk op ⏹ om te stoppen.`;
+    hint.classList.remove("hidden");
+  } else {
+    hint.classList.add("hidden");
+  }
+
   const queue = (status?.queue || []).filter((item) => item?.track);
   if (!queue.length) {
-    list.innerHTML = '<li class="empty-state">Wachtrij is leeg</li>';
+    list.innerHTML = playlistActive
+      ? '<li class="empty-state">Volgende shuffle-rondes verschijnen hier</li>'
+      : '<li class="empty-state">Wachtrij is leeg</li>';
     return;
   }
   list.innerHTML = queue.map((item, i) => `
@@ -107,10 +153,11 @@ function renderQueue() {
         <div class="title">${i + 1}. ${esc(item.track.title)}</div>
         <div class="meta">${esc(item.track.artist || "Onbekend")} · ${formatTime(item.track.duration)}</div>
       </div>
+      ${playlistActive ? "" : `
       <div class="track-actions">
-        <button type="button" class="btn-small" data-play-queue="${item.id}">Speel nu</button>
-        <button type="button" class="btn-danger" data-remove-queue="${item.id}">✕</button>
-      </div>
+        <button type="button" class="btn-small" data-queue-id="${queueItemId(item)}">Speel nu</button>
+        <button type="button" class="btn-danger" data-queue-id="${queueItemId(item)}" data-remove-queue>✕</button>
+      </div>`}
     </li>
   `).join("");
 }
@@ -196,6 +243,50 @@ function esc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+let dialogResolve = null;
+
+function finishDialog(result) {
+  $("dialog-modal").classList.add("hidden");
+  const resolve = dialogResolve;
+  dialogResolve = null;
+  if (resolve) resolve(result);
+}
+
+function showAlert(message, title = "Melding") {
+  return new Promise((resolve) => {
+    dialogResolve = () => resolve();
+    $("dialog-title").textContent = title;
+    $("dialog-message").textContent = message;
+    $("dialog-cancel").classList.add("hidden");
+    $("dialog-confirm").classList.add("hidden");
+    $("dialog-ok").classList.remove("hidden");
+    $("dialog-modal").classList.remove("hidden");
+    $("dialog-ok").focus();
+  });
+}
+
+function showConfirm(message, { title = "Bevestigen", confirmLabel = "Bevestigen", cancelLabel = "Annuleren" } = {}) {
+  return new Promise((resolve) => {
+    dialogResolve = resolve;
+    $("dialog-title").textContent = title;
+    $("dialog-message").textContent = message;
+    $("dialog-ok").classList.add("hidden");
+    $("dialog-cancel").classList.remove("hidden");
+    $("dialog-confirm").classList.remove("hidden");
+    $("dialog-cancel").textContent = cancelLabel;
+    $("dialog-confirm").textContent = confirmLabel;
+    $("dialog-modal").classList.remove("hidden");
+    $("dialog-confirm").focus();
+  });
+}
+
+function initDialog() {
+  $("dialog-modal-backdrop").addEventListener("click", () => finishDialog(false));
+  $("dialog-cancel").addEventListener("click", () => finishDialog(false));
+  $("dialog-confirm").addEventListener("click", () => finishDialog(true));
+  $("dialog-ok").addEventListener("click", () => finishDialog(true));
+}
+
 async function loadData() {
   [tracks, playlists, status] = await Promise.all([
     api("/api/tracks"),
@@ -213,14 +304,18 @@ $("trash-btn").addEventListener("click", async () => {
     await loadTrash();
     openTrashModal();
   } catch (err) {
-    alert(err.message || "Prullenbak laden mislukt");
+    await showAlert(err.message || "Prullenbak laden mislukt", "Prullenbak");
   }
 });
 $("trash-modal-close").addEventListener("click", closeTrashModal);
 $("trash-modal-backdrop").addEventListener("click", closeTrashModal);
 
 $("restart-btn").addEventListener("click", async () => {
-  if (!confirm("Server afsluiten? run.sh doet daarna git pull en start de service opnieuw.")) return;
+  const ok = await showConfirm(
+    "Server afsluiten? run.sh doet daarna git pull en start de service opnieuw.",
+    { title: "Server herstarten", confirmLabel: "Herstarten", cancelLabel: "Annuleren" }
+  );
+  if (!ok) return;
   try {
     await api("/api/admin/restart", { method: "POST" });
   } catch {
@@ -235,10 +330,17 @@ $("btn-play").addEventListener("click", async () => {
     if (status?.state === "playing") await api("/api/playback/pause", { method: "POST" });
     else await api("/api/playback/play", { method: "POST" });
   } catch (err) {
-    alert(err.message || "Afspelen mislukt");
+    await showAlert(err.message || "Afspelen mislukt");
   }
 });
-$("btn-stop").addEventListener("click", () => api("/api/playback/stop", { method: "POST" }));
+$("btn-stop").addEventListener("click", async () => {
+  try {
+    await api("/api/playback/stop", { method: "POST" });
+    await refreshPlaybackUi();
+  } catch (err) {
+    await showAlert(err.message || "Stoppen mislukt");
+  }
+});
 $("btn-skip").addEventListener("click", () => api("/api/playback/skip", { method: "POST" }));
 $("volume").addEventListener("input", (e) => {
   const v = Number(e.target.value);
@@ -273,32 +375,42 @@ function clickTarget(e, selector) {
 }
 
 document.addEventListener("click", async (e) => {
-  const playQueueEl = clickTarget(e, "[data-play-queue]");
-  if (playQueueEl) {
+  const queueActionEl = clickTarget(e, "[data-queue-id]");
+  if (queueActionEl) {
     e.preventDefault();
-    const id = playQueueEl.getAttribute("data-play-queue");
+    const id = queueActionEl.getAttribute("data-queue-id");
+    const isRemove = queueActionEl.hasAttribute("data-remove-queue");
     suppressQueueSse();
     try {
-      await api(`/api/queue/${id}/play`, { method: "POST" });
+      if (isRemove) {
+        await api(`/api/queue/${id}`, { method: "DELETE" });
+      } else {
+        await api(`/api/queue/${id}/play`, { method: "POST" });
+      }
       await refreshPlaybackUi();
     } catch (err) {
       await refreshPlaybackUi();
-      alert(err.message || "Afspelen mislukt");
+      await showAlert(err.message || (isRemove ? "Verwijderen uit wachtrij mislukt" : "Afspelen mislukt"));
     }
     return;
   }
 
-  const removeQueueEl = clickTarget(e, "[data-remove-queue]");
-  if (removeQueueEl) {
-    e.preventDefault();
-    const id = Number(removeQueueEl.getAttribute("data-remove-queue"));
+  const queueAddEl = clickTarget(e, "[data-queue]");
+  if (queueAddEl?.dataset.queue) {
+    if (isPlaylistMode()) {
+      await showAlert("Afspeellijst is actief — stop met ⏹ om handmatig af te spelen.", "Afspeellijst actief");
+      return;
+    }
     suppressQueueSse();
     try {
-      await api(`/api/queue/${id}`, { method: "DELETE" });
+      await api("/api/queue", {
+        method: "POST",
+        body: JSON.stringify({ track_id: Number(queueAddEl.dataset.queue) }),
+      });
       await refreshPlaybackUi();
     } catch (err) {
       await refreshPlaybackUi();
-      alert(err.message || "Verwijderen uit wachtrij mislukt");
+      await showAlert(err.message || "Toevoegen aan wachtrij mislukt");
     }
     return;
   }
@@ -306,21 +418,20 @@ document.addEventListener("click", async (e) => {
   const t = e.target;
   if (!(t instanceof HTMLElement)) return;
 
-  if (t.dataset.queue) {
-    suppressQueueSse();
-    await api("/api/queue", { method: "POST", body: JSON.stringify({ track_id: Number(t.dataset.queue) }) });
-    await refreshPlaybackUi();
-  }
   if (t.dataset.deleteTrack) {
     const track = tracks.find((tr) => tr.id === Number(t.dataset.deleteTrack));
     const name = track?.title || "dit nummer";
-    if (!confirm(`"${name}" naar de prullenbak verplaatsen? Het nummer blijft een week bewaard.`)) return;
+    const ok = await showConfirm(
+      `"${name}" naar de prullenbak verplaatsen? Het nummer blijft een week bewaard.`,
+      { title: "Naar prullenbak", confirmLabel: "Verplaatsen", cancelLabel: "Annuleren" }
+    );
+    if (!ok) return;
     try {
       await api(`/api/tracks/${t.dataset.deleteTrack}`, { method: "DELETE" });
       await loadData();
       if (!$("trash-modal").classList.contains("hidden")) await loadTrash();
     } catch (err) {
-      alert(err.message || "Verwijderen mislukt");
+      await showAlert(err.message || "Verwijderen mislukt");
     }
   }
   if (t.dataset.restoreTrack) {
@@ -330,7 +441,7 @@ document.addEventListener("click", async (e) => {
       renderTracks();
       await loadTrash();
     } catch (err) {
-      alert(err.message || "Herstellen mislukt");
+      await showAlert(err.message || "Herstellen mislukt");
     }
     return;
   }
@@ -381,4 +492,7 @@ $("playlist-create-btn").addEventListener("click", async () => {
   renderPlaylists();
 });
 
-loadData().then(connectEvents);
+loadData().then(() => {
+  initDialog();
+  connectEvents();
+});

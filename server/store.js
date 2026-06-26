@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
+import { normalizeQueueIds } from "./queue-helpers.js";
 
 const storePath = path.join(config.dataDir, "store.json");
 
@@ -29,6 +30,7 @@ export async function initStore() {
   try {
     const raw = await fs.readFile(storePath, "utf8");
     cache = JSON.parse(raw);
+    if (normalizeQueueIds(cache)) await flushStore();
   } catch {
     cache = defaultStore();
     await flushStore();

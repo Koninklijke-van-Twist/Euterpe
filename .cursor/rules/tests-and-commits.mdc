@@ -1,0 +1,19 @@
+---
+description: Tests en commits na elke feature of fix
+alwaysApply: true
+---
+
+# Tests en commits
+
+## Na elke feature of fix
+
+1. **Test toevoegen** — Schrijf of breid een test uit in `tests/` zodat het gedrag bewaakt blijft. Gebruik `npm test` (`node --test tests/**/*.test.js`).
+2. **Testsuite draaien** — Voer altijd `npm test` uit en los alle fouten op voordat je de taak afrondt.
+3. **Commit** — Alleen als alle tests groen zijn: maak zonder extra bevestiging te vragen een commit met een korte, accurate message (focus op het waarom).
+
+## Richtlijnen
+
+- Geen `alert()` of `confirm()` in de frontend; gebruik eigen modals (`showAlert` / `showConfirm` in `public/app.js`).
+- Nieuwe serverlogica hoort unit tests in `tests/`; API-gedrag kan aanvullend via `npm run test:api` (vereist draaiende server).
+- Commit geen secrets (`.env`, credentials).
+- Push niet naar remote tenzij de gebruiker dat expliciet vraagt.

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 import * as playback from "./playback.js";
-import { shouldAutoPlayOnEnqueue } from "./queue-helpers.js";
+import { shouldAutoPlayOnEnqueue, assertManualQueueAllowed, formatQueueItem } from "./queue-helpers.js";
 import { readStore, updateStore } from "./store.js";
 import {
   activeTracks,
@@ -160,11 +160,11 @@ export async function handleApi(req, res, url) {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     let autoPlay = false;
     const item = await updateStore((store) => {
+      assertManualQueueAllowed(store);
       if (!store.tracks.some((t) => t.id === body.track_id && !t.deleted_at)) {
         throw Object.assign(new Error("Track not found"), { status: 404 });
       }
       autoPlay = shouldAutoPlayOnEnqueue(store);
-      store.playback.activePlaylistId = null;
       const position = body.position ?? store.queue.length;
       store.queue.forEach((q) => {
         if (q.position >= position) q.position += 1;
@@ -191,8 +191,10 @@ export async function handleApi(req, res, url) {
     }
     await broadcastStatus();
     const status = await playback.getStatusPayload();
-    const full = status.queue.find((q) => q.id === item.id);
-    return json(res, 200, full);
+    const full = status.queue.find((q) => q.queue_id === item.id);
+    if (full) return json(res, 200, full);
+    const store = await readStore();
+    return json(res, 200, { ...formatQueueItem(store, item), auto_played: autoPlay });
   }
 
   if (method === "POST" && pathname.match(/^\/api\/queue\/\d+\/play$/)) {

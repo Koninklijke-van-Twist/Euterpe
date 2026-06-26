@@ -18,7 +18,7 @@ function log(label, s) {
     current: s.current_track?.title,
     currentId: s.current_track?.id,
     position: s.position?.toFixed?.(1),
-    queue: s.queue?.map((q) => ({ id: q.id, title: q.track?.title })),
+    queue: s.queue?.map((q) => ({ queue_id: q.queue_id, title: q.track?.title })),
     playlist: s.active_playlist_id,
   });
 }
@@ -37,20 +37,20 @@ if (!s.queue?.length) {
 }
 
 const q1 = s.queue[0];
-console.log("\n--- DELETE first queue item", q1.id, q1.track.title, "---");
-const del = await req("DELETE", `/api/queue/${q1.id}`);
+console.log("\n--- DELETE first queue item", q1.queue_id, q1.track.title, "---");
+const del = await req("DELETE", `/api/queue/${q1.queue_id}`);
 console.log("DELETE status:", del.status);
 s = (await req("GET", "/api/playback/status")).data;
 log("AFTER DELETE", s);
-if (s.queue.some((q) => q.id === q1.id)) {
+if (s.queue.some((q) => q.queue_id === q1.queue_id)) {
   console.error("FAIL: item still in queue after delete");
   process.exit(1);
 }
 
 if (s.queue.length) {
   const q2 = s.queue[0];
-  console.log("\n--- PLAY NOW", q2.id, q2.track.title, "---");
-  const play = await req("POST", `/api/queue/${q2.id}/play`);
+  console.log("\n--- PLAY NOW", q2.queue_id, q2.track.title, "---");
+  const play = await req("POST", `/api/queue/${q2.queue_id}/play`);
   console.log("PLAY NOW status:", play.status, play.data);
   await new Promise((r) => setTimeout(r, 1500));
   s = (await req("GET", "/api/playback/status")).data;
@@ -59,7 +59,7 @@ if (s.queue.length) {
     console.error("FAIL: wrong track playing, expected", q2.track.id, "got", s.current_track?.id);
     process.exit(1);
   }
-  if (s.queue.some((q) => q.id === q2.id)) {
+  if (s.queue.some((q) => q.queue_id === q2.queue_id)) {
     console.error("FAIL: played item still in queue");
     process.exit(1);
   }
