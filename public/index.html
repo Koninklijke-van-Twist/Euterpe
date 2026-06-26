@@ -113,6 +113,20 @@
     </div>
   </div>
 
-  <script src="/app.js?v=11"></script>
+  <div id="upload-modal" class="modal hidden" role="dialog" aria-labelledby="upload-modal-title" aria-modal="true" aria-busy="true">
+    <div class="modal-backdrop" id="upload-modal-backdrop"></div>
+    <div class="modal-panel upload-modal-panel">
+      <div class="modal-header">
+        <h2 id="upload-modal-title">Uploaden</h2>
+      </div>
+      <p id="upload-modal-file" class="modal-hint"></p>
+      <div class="progress-bar upload-progress-bar" aria-hidden="true">
+        <div id="upload-progress-fill" class="progress-fill"></div>
+      </div>
+      <p id="upload-modal-percent" class="upload-percent">0%</p>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js?v=12"></script>
 </body>
 </html>

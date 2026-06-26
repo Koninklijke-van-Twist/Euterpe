@@ -1,3 +1,5 @@
+import { overallUploadProgress } from "./upload-progress.js";
+
 let tracks = [];
 let playlists = [];
 let trashTracks = [];
@@ -468,14 +470,106 @@ uploadZone.addEventListener("drop", (e) => {
 });
 fileInput.addEventListener("change", (e) => uploadFiles(e.target.files));
 
-async function uploadFiles(files) {
-  for (const file of files) {
+let suppressQueueSseUntil = 0;
+let uploadInProgress = false;
+
+function openUploadModal(fileCount) {
+  $("upload-modal-title").textContent = fileCount > 1 ? `${fileCount} nummers uploaden` : "Nummer uploaden";
+  $("upload-modal-file").textContent = "";
+  $("upload-progress-fill").style.width = "0%";
+  $("upload-modal-percent").textContent = "0%";
+  $("upload-modal").classList.remove("hidden");
+}
+
+function updateUploadModal({ fileName, fileIndex, fileCount, fraction }) {
+  const pct = Math.round(fraction * 100);
+  $("upload-modal-file").textContent =
+    fileCount > 1 ? `${fileName} (${fileIndex} van ${fileCount})` : fileName;
+  $("upload-progress-fill").style.width = `${pct}%`;
+  $("upload-modal-percent").textContent = `${pct}%`;
+}
+
+function closeUploadModal() {
+  $("upload-modal").classList.add("hidden");
+}
+
+function uploadFileWithProgress(file, onFileProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
     const form = new FormData();
     form.append("file", file);
-    await api("/api/tracks/upload", { method: "POST", body: form });
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) onFileProgress(e.loaded / e.total);
+    });
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          resolve(null);
+        }
+        return;
+      }
+      try {
+        const err = JSON.parse(xhr.responseText);
+        reject(new Error(err.detail || "Upload mislukt"));
+      } catch {
+        reject(new Error("Upload mislukt"));
+      }
+    });
+    xhr.addEventListener("error", () => reject(new Error("Upload mislukt")));
+    xhr.open("POST", "/api/tracks/upload");
+    xhr.send(form);
+  });
+}
+
+async function uploadFiles(fileList) {
+  if (uploadInProgress) return;
+  const files = Array.from(fileList).filter((f) => f?.size >= 0);
+  if (!files.length) return;
+
+  uploadInProgress = true;
+  openUploadModal(files.length);
+  const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+  let uploadedBytes = 0;
+
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      await uploadFileWithProgress(file, (fileFraction) => {
+        const fraction = overallUploadProgress(
+          uploadedBytes,
+          totalBytes,
+          file.size,
+          fileFraction,
+          i,
+          files.length
+        );
+        updateUploadModal({
+          fileName: file.name,
+          fileIndex: i + 1,
+          fileCount: files.length,
+          fraction,
+        });
+      });
+      uploadedBytes += file.size;
+      updateUploadModal({
+        fileName: file.name,
+        fileIndex: i + 1,
+        fileCount: files.length,
+        fraction: overallUploadProgress(uploadedBytes, totalBytes, file.size, 1, i, files.length),
+      });
+    }
+    tracks = await api("/api/tracks");
+    renderTracks();
+    closeUploadModal();
+  } catch (err) {
+    closeUploadModal();
+    await showAlert(err.message || "Upload mislukt", "Uploaden");
+  } finally {
+    uploadInProgress = false;
+    fileInput.value = "";
   }
-  tracks = await api("/api/tracks");
-  renderTracks();
 }
 
 function clickTarget(e, selector) {
