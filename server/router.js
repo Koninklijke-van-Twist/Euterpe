@@ -9,6 +9,7 @@ import { getCachedCommitSha } from "./version.js";
 import {
   addTrackToPlaylist,
   dedupeTrackIds,
+  parsePlaylistDelete,
   parsePlaylistTrackAdd,
   parsePlaylistTrackDelete,
   removeTrackFromPlaylist,
@@ -299,26 +300,6 @@ export async function handleApi(req, res, url) {
     return json(res, 200, playlistOut(store, playlist));
   }
 
-  if (method === "PUT" && pathname.startsWith("/api/playlists/")) {
-    const id = Number(pathname.split("/")[3]);
-    const body = JSON.parse((await readBody(req)).toString("utf8"));
-    const updated = await updateStore((store) => {
-      const p = store.playlists.find((pl) => pl.id === id);
-      if (!p) throw Object.assign(new Error("Not found"), { status: 404 });
-      if (body.name != null) p.name = body.name;
-      if (body.description != null) p.description = body.description;
-      if (body.track_ids != null) p.trackIds = dedupeTrackIds(body.track_ids);
-      p.updatedAt = new Date().toISOString();
-      return p;
-    }).catch((err) => {
-      json(res, err.status || 500, { detail: err.message });
-      return null;
-    });
-    if (!updated) return;
-    const store = await readStore();
-    return json(res, 200, playlistOut(store, updated));
-  }
-
   const playlistTrackDelete = method === "DELETE" ? parsePlaylistTrackDelete(pathname) : null;
   if (playlistTrackDelete) {
     const { playlistId, trackId } = playlistTrackDelete;
@@ -365,11 +346,11 @@ export async function handleApi(req, res, url) {
     return json(res, 200, playlistOut(store, updated));
   }
 
-  if (method === "DELETE" && pathname.match(/^\/api\/playlists\/\d+$/)) {
-    const id = Number(pathname.split("/")[3]);
+  const playlistDeleteId = method === "DELETE" ? parsePlaylistDelete(pathname) : null;
+  if (playlistDeleteId) {
     try {
       await updateStore((store) => {
-        const idx = store.playlists.findIndex((p) => p.id === id);
+        const idx = store.playlists.findIndex((p) => p.id === playlistDeleteId);
         if (idx === -1) throw Object.assign(new Error("Not found"), { status: 404 });
         store.playlists.splice(idx, 1);
       });
@@ -377,6 +358,26 @@ export async function handleApi(req, res, url) {
     } catch (err) {
       return json(res, err.status || 500, { detail: err.message });
     }
+  }
+
+  if (method === "PUT" && pathname.match(/^\/api\/playlists\/\d+$/)) {
+    const id = Number(pathname.split("/")[3]);
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    const updated = await updateStore((store) => {
+      const p = store.playlists.find((pl) => pl.id === id);
+      if (!p) throw Object.assign(new Error("Not found"), { status: 404 });
+      if (body.name != null) p.name = body.name;
+      if (body.description != null) p.description = body.description;
+      if (body.track_ids != null) p.trackIds = dedupeTrackIds(body.track_ids);
+      p.updatedAt = new Date().toISOString();
+      return p;
+    }).catch((err) => {
+      json(res, err.status || 500, { detail: err.message });
+      return null;
+    });
+    if (!updated) return;
+    const store = await readStore();
+    return json(res, 200, playlistOut(store, updated));
   }
 
   if (method === "POST" && pathname.match(/^\/api\/playlists\/\d+\/play$/)) {

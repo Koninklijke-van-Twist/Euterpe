@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import {
   addTrackToPlaylist,
   dedupeTrackIds,
+  parsePlaylistDelete,
   parsePlaylistTrackAdd,
   parsePlaylistTrackDelete,
   playlistContainsTrack,
@@ -46,6 +47,12 @@ describe("playlist helpers", () => {
       trackId: 12,
     });
     assert.equal(parsePlaylistTrackDelete("/api/playlists/7"), null);
+  });
+
+  it("playlist delete route does not match track removal path", () => {
+    assert.equal(parsePlaylistDelete("/api/playlists/7"), 7);
+    assert.equal(parsePlaylistDelete("/api/playlists/7/tracks/12"), null);
+    assert.equal(parsePlaylistDelete("/api/playlists/7/tracks"), null);
   });
 });
 

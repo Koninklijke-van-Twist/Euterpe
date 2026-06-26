@@ -278,15 +278,19 @@ function closePlaylistPicker() {
 async function toggleTrackInPlaylist(playlistId, checked) {
   const trackId = playlistPickerTrackId;
   if (!trackId) return;
+  const pl = playlists.find((p) => p.id === playlistId);
+  if (!pl) return;
+  let trackIds = playlistTrackIds(pl);
+  if (checked) {
+    if (!trackIds.includes(trackId)) trackIds = [...trackIds, trackId];
+  } else {
+    trackIds = trackIds.filter((id) => id !== trackId);
+  }
   try {
-    if (checked) {
-      await api(`/api/playlists/${playlistId}/tracks`, {
-        method: "POST",
-        body: JSON.stringify({ track_id: trackId }),
-      });
-    } else {
-      await api(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: "DELETE" });
-    }
+    await api(`/api/playlists/${playlistId}`, {
+      method: "PUT",
+      body: JSON.stringify({ track_ids: trackIds }),
+    });
     playlists = await api("/api/playlists");
     if (editingPlaylist?.id === playlistId) {
       editingPlaylist = playlists.find((p) => p.id === playlistId) || null;

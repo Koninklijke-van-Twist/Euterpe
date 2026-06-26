@@ -18,6 +18,11 @@ export function removeTrackFromPlaylist(playlist, trackId) {
   return playlist.trackIds.length !== before;
 }
 
+export function parsePlaylistDelete(pathname) {
+  const m = pathname.match(/^\/api\/playlists\/(\d+)$/);
+  return m ? Number(m[1]) : null;
+}
+
 export function parsePlaylistTrackAdd(pathname) {
   const m = pathname.match(/^\/api\/playlists\/(\d+)\/tracks$/);
   return m ? Number(m[1]) : null;
