@@ -2,7 +2,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import { mpv } from "./mpv.js";
 import { shuffleWithSpacing } from "./shuffle.js";
-import { readStore, updateStore } from "./store.js";
+import { readStore, updateStore, mutateStore, flushStore } from "./store.js";
 
 const listeners = new Set();
 
@@ -10,6 +10,58 @@ let position = 0;
 let duration = 0;
 let paused = true;
 let volume = 75;
+let pollTimer = null;
+let playbackFlushTimer = null;
+
+function schedulePlaybackPersist() {
+  if (playbackFlushTimer) return;
+  playbackFlushTimer = setTimeout(() => {
+    playbackFlushTimer = null;
+    flushStore().catch(() => {});
+  }, 2500);
+}
+
+function syncPlaybackState(immediate = false) {
+  mutateStore((store) => {
+    store.playback.position = position;
+    store.playback.duration = duration;
+    store.playback.volume = volume;
+    if (paused) {
+      store.playback.state = store.playback.currentTrackId ? "paused" : "stopped";
+    } else {
+      store.playback.state = "playing";
+    }
+  });
+  if (immediate) flushStore().catch(() => {});
+  else schedulePlaybackPersist();
+}
+function startPositionPoll() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    if (!mpv.connected) return;
+    try {
+      const [pos, dur, isPaused] = await Promise.all([
+        mpv.getProperty("time-pos"),
+        mpv.getProperty("duration"),
+        mpv.getProperty("pause"),
+      ]);
+      if (pos != null && Number.isFinite(Number(pos))) position = Number(pos);
+      if (dur != null && Number.isFinite(Number(dur))) duration = Number(dur);
+      if (isPaused != null) paused = Boolean(isPaused);
+      syncPlaybackState();
+      await notify();
+    } catch {
+      /* engine may be busy */
+    }
+  }, 800);
+}
+
+function stopPositionPoll() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
 
 export function onStatusChange(fn) {
   listeners.add(fn);
@@ -25,13 +77,16 @@ function trackPath(track) {
 }
 
 function popNextFromQueue(store) {
-  if (!store.queue.length) return null;
-  store.queue.sort((a, b) => a.position - b.position);
-  const [item] = store.queue.splice(0, 1);
-  store.queue.forEach((q, i) => {
-    q.position = i;
-  });
-  return store.tracks.find((t) => t.id === item.trackId) || null;
+  while (store.queue.length) {
+    store.queue.sort((a, b) => a.position - b.position);
+    const [item] = store.queue.splice(0, 1);
+    store.queue.forEach((q, i) => {
+      q.position = i;
+    });
+    const track = store.tracks.find((t) => t.id === item.trackId && !t.deleted_at);
+    if (track) return track;
+  }
+  return null;
 }
 
 function reshufflePlaylist(store) {
@@ -51,72 +106,118 @@ function reshufflePlaylist(store) {
 }
 
 export function attachMpvEvents() {
-  mpv.onEvent(async (event) => {
-    if (event.event === "property-change") {
-      if (event.name === "time-pos" && event.data != null) position = Number(event.data);
-      if (event.name === "duration" && event.data != null) duration = Number(event.data);
-      if (event.name === "pause" && event.data != null) paused = Boolean(event.data);
-      if (event.name === "volume" && event.data != null) volume = Number(event.data);
-      await syncPlaybackState();
-      await notify();
-    }
-    if (event.event === "end-file" && event.reason === "eof") {
-      await onTrackFinished();
-    }
-    if (event.event === "file-loaded") {
-      await syncPlaybackState();
-      await notify();
-    }
+  mpv.onEvent((event) => {
+    handleMpvEvent(event).catch((err) => {
+      console.error("MPV event error:", err.message);
+    });
   });
 }
 
-async function syncPlaybackState() {
-  await updateStore((store) => {
-    store.playback.position = position;
-    store.playback.duration = duration;
-    store.playback.volume = volume;
-    if (paused) {
-      store.playback.state = store.playback.currentTrackId ? "paused" : "stopped";
-    } else {
-      store.playback.state = "playing";
-    }
-  });
+async function handleMpvEvent(event) {
+  if (event.event === "property-change") {
+    if (event.name === "time-pos" && event.data != null) position = Number(event.data);
+    if (event.name === "duration" && event.data != null) duration = Number(event.data);
+    if (event.name === "pause" && event.data != null) paused = Boolean(event.data);
+    if (event.name === "volume" && event.data != null) volume = Number(event.data);
+    syncPlaybackState();
+    await notify();
+  }
+  if (event.event === "end-file" && event.reason === "eof") {
+    await onTrackFinished();
+  }
+  if (event.event === "file-loaded") {
+    syncPlaybackState();
+    await notify();
+  }
+}
+
+async function mpvHasLoadedFile() {
+  try {
+    const mpvPath = await mpv.getProperty("path");
+    return Boolean(mpvPath && mpvPath !== "/" && mpvPath !== "(unavailable)");
+  } catch {
+    return false;
+  }
 }
 
 async function playTrack(track) {
+  if (!mpv.connected) {
+    throw new Error("Audio-engine niet verbonden — herstart de server en controleer EUTERPE_MPV_PATH");
+  }
+
+  const file = trackPath(track);
+  await mpv.loadFile(file);
+  await mpv.pause(false);
+  paused = false;
+
+  try {
+    position = Number((await mpv.getProperty("time-pos")) ?? 0);
+    duration = Number((await mpv.getProperty("duration")) ?? track.duration ?? 0);
+  } catch {
+    position = 0;
+    duration = track.duration ?? 0;
+  }
+
   await updateStore((store) => {
     store.playback.currentTrackId = track.id;
     store.playback.state = "playing";
-    store.playback.position = 0;
-    store.playback.duration = track.duration || 0;
+    store.playback.position = position;
+    store.playback.duration = duration;
   });
-  await mpv.loadFile(trackPath(track));
-  await mpv.pause(false);
-  paused = false;
+
+  startPositionPoll();
   await notify();
 }
 
 async function onTrackFinished() {
   let nextTrack = null;
+  let inPlaylistMode = false;
   await updateStore((store) => {
+    inPlaylistMode = Boolean(store.playback.activePlaylistId);
     store.playback.currentTrackId = null;
     store.playback.position = 0;
     store.playback.state = "stopped";
     nextTrack = popNextFromQueue(store);
-    if (!nextTrack && store.playback.activePlaylistId) {
+    if (!nextTrack && inPlaylistMode) {
       reshufflePlaylist(store);
       nextTrack = popNextFromQueue(store);
     }
   });
-  if (nextTrack) await playTrack(nextTrack);
-  else await notify();
+  if (nextTrack) {
+    await playTrack(nextTrack);
+  } else {
+    stopPositionPoll();
+    if (playbackFlushTimer) {
+      clearTimeout(playbackFlushTimer);
+      playbackFlushTimer = null;
+    }
+    if (mpv.connected) await mpv.stop();
+    paused = true;
+    position = 0;
+    await updateStore((store) => {
+      store.playback.currentTrackId = null;
+      store.playback.state = "stopped";
+      store.playback.position = 0;
+      if (!inPlaylistMode) store.playback.activePlaylistId = null;
+    });
+    await notify();
+  }
 }
 
 export async function play() {
+  if (!mpv.connected) {
+    throw new Error("Audio-engine niet verbonden");
+  }
   const store = await readStore();
   if (store.playback.currentTrackId) {
+    const track = store.tracks.find((t) => t.id === store.playback.currentTrackId);
+    if (track && !(await mpvHasLoadedFile())) {
+      await playTrack(track);
+      return;
+    }
     await mpv.pause(false);
     paused = false;
+    startPositionPoll();
     await updateStore((s) => {
       s.playback.state = "playing";
     });
@@ -140,7 +241,12 @@ export async function pause() {
 }
 
 export async function stop() {
-  await mpv.stop();
+  stopPositionPoll();
+  if (playbackFlushTimer) {
+    clearTimeout(playbackFlushTimer);
+    playbackFlushTimer = null;
+  }
+  if (mpv.connected) await mpv.stop();
   paused = true;
   position = 0;
   await updateStore((s) => {
@@ -165,6 +271,28 @@ export async function setVolume(v) {
   await notify();
 }
 
+export async function playQueueItemNow(queueItemId) {
+  let track = null;
+  await updateStore((store) => {
+    store.queue.sort((a, b) => a.position - b.position);
+    const idx = store.queue.findIndex((q) => q.id === queueItemId);
+    if (idx === -1) {
+      throw Object.assign(new Error("Niet in wachtrij"), { status: 404 });
+    }
+    store.queue.splice(0, idx);
+    const [item] = store.queue.splice(0, 1);
+    store.queue.forEach((q, i) => {
+      q.position = i;
+    });
+    track = store.tracks.find((t) => t.id === item.trackId) || null;
+    store.playback.activePlaylistId = null;
+  });
+  if (!track) {
+    throw Object.assign(new Error("Nummer niet gevonden"), { status: 404 });
+  }
+  await playTrack(track);
+}
+
 export async function playPlaylist(playlistId) {
   let first = null;
   await updateStore((store) => {
@@ -187,24 +315,47 @@ export async function playPlaylist(playlistId) {
   else await notify();
 }
 
+export async function syncAfterMpvStart() {
+  const store = await readStore();
+  if (!store.playback.currentTrackId) return;
+
+  const track = store.tracks.find((t) => t.id === store.playback.currentTrackId);
+  if (!track) {
+    await updateStore((s) => {
+      s.playback.currentTrackId = null;
+      s.playback.state = "stopped";
+      s.playback.position = 0;
+    });
+    return;
+  }
+
+  if (store.playback.state === "playing") {
+    await playTrack(track);
+  } else if (store.playback.state === "paused") {
+    await playTrack(track);
+    await pause();
+  }
+}
+
 export async function getStatusPayload() {
   const store = await readStore();
-  const currentTrack = store.tracks.find((t) => t.id === store.playback.currentTrackId) || null;
+  const currentTrackRaw = store.tracks.find((t) => t.id === store.playback.currentTrackId);
+  const currentTrack = currentTrackRaw && !currentTrackRaw.deleted_at ? currentTrackRaw : null;
   const queue = store.queue
     .slice()
     .sort((a, b) => a.position - b.position)
     .map((item) => ({
       ...item,
-      track: store.tracks.find((t) => t.id === item.trackId),
+      track: store.tracks.find((t) => t.id === item.trackId && !t.deleted_at),
     }))
     .filter((item) => item.track);
 
   return {
     state: store.playback.state,
     current_track: currentTrack,
-    position: position || store.playback.position,
-    duration: duration || store.playback.duration,
-    volume: volume || store.playback.volume,
+    position: position ?? store.playback.position,
+    duration: duration ?? store.playback.duration,
+    volume: volume ?? store.playback.volume,
     queue,
     active_playlist_id: store.playback.activePlaylistId,
   };

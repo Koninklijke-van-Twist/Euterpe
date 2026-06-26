@@ -12,11 +12,10 @@
 </head>
 <body>
   <div id="app" class="app-shell">
+    <div class="hero-logo-glow" aria-hidden="true"></div>
+
     <header class="site-header">
-      <div class="hero-logo-wrap">
-        <div class="hero-logo-glow" aria-hidden="true"></div>
-        <img src="/euterpe-logo-large.png" alt="Euterpe" class="hero-logo" />
-      </div>
+      <img src="/euterpe-logo-large.png" alt="Euterpe" class="hero-logo" />
     </header>
 
     <section class="panel now-playing" id="player">
@@ -42,7 +41,10 @@
 
     <div class="grid">
       <section class="panel">
-        <h2>Bibliotheek</h2>
+        <div class="panel-header">
+          <h2>Bibliotheek</h2>
+          <button type="button" class="btn-trash-icon" id="trash-btn" title="Prullenbak" aria-label="Prullenbak">🗑️</button>
+        </div>
         <div class="upload-zone" id="upload-zone">
           <input type="file" id="file-input" accept="audio/*" multiple hidden />
           Sleep audiobestanden hierheen of klik om te uploaden
@@ -68,6 +70,18 @@
     <footer class="site-footer">
       <button class="btn-secondary restart" id="restart-btn" title="Sluit server af — run.sh herstart en update">Herstart</button>
     </footer>
+  </div>
+
+  <div id="trash-modal" class="modal hidden" role="dialog" aria-labelledby="trash-modal-title" aria-modal="true">
+    <div class="modal-backdrop" id="trash-modal-backdrop"></div>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 id="trash-modal-title">Prullenbak</h2>
+        <button type="button" class="btn-icon modal-close" id="trash-modal-close" title="Sluiten">✕</button>
+      </div>
+      <p class="modal-hint">Verwijderde nummers blijven een week bewaard en worden daarna permanent gewist.</p>
+      <ul class="track-list" id="trash-list"></ul>
+    </div>
   </div>
 
   <script src="/app.js"></script>

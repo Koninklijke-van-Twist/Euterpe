@@ -3,10 +3,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
-import { attachMpvEvents } from "./playback.js";
+import { attachMpvEvents, syncAfterMpvStart } from "./playback.js";
 import { mpv } from "./mpv.js";
 import { handleApi, handleSse, broadcastStatus } from "./router.js";
 import { initStore } from "./store.js";
+import { purgeExpiredTrash } from "./trash.js";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -56,11 +57,14 @@ const server = http.createServer(async (req, res) => {
 });
 
 await initStore();
+await purgeExpiredTrash().catch((err) => console.warn("Prullenbak opschonen mislukt:", err.message));
+setInterval(() => purgeExpiredTrash().catch(() => {}), 60 * 60 * 1000);
 attachMpvEvents();
 
 try {
   await mpv.start();
   console.log(`Audio engine connected (${config.mpvPath})`);
+  await syncAfterMpvStart();
 } catch (err) {
   console.warn(`Audio engine not available (${config.mpvPath}):`, err.message);
 }

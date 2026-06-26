@@ -1,5 +1,6 @@
 let tracks = [];
 let playlists = [];
+let trashTracks = [];
 let status = null;
 let editingPlaylist = null;
 let selectedTrackIds = [];
@@ -75,7 +76,7 @@ function renderTracks() {
         <div class="meta">${esc(t.artist || "Onbekend")} · ${formatTime(t.duration)} · ${formatBytes(t.file_size)}</div>
       </div>
       <div class="track-actions">
-        <button class="btn-small" data-queue="${t.id}">+ Wachtrij</button>
+        <button class="btn-small" data-queue="${t.id}">▶</button>
         <button class="btn-danger" data-delete-track="${t.id}">✕</button>
       </div>
     </li>
@@ -95,7 +96,10 @@ function renderQueue() {
         <div class="title">${i + 1}. ${esc(item.track.title)}</div>
         <div class="meta">${esc(item.track.artist || "Onbekend")} · ${formatTime(item.track.duration)}</div>
       </div>
-      <button class="btn-danger" data-remove-queue="${item.id}">✕</button>
+      <div class="track-actions">
+        <button class="btn-small" data-play-queue="${item.id}">Speel nu</button>
+        <button class="btn-danger" data-remove-queue="${item.id}">✕</button>
+      </div>
     </li>
   `).join("");
 }
@@ -147,6 +151,36 @@ function renderPlaylistEditor() {
   `;
 }
 
+function renderTrashModal() {
+  const list = $("trash-list");
+  if (!trashTracks.length) {
+    list.innerHTML = '<li class="empty-state">Prullenbak is leeg</li>';
+    return;
+  }
+  list.innerHTML = trashTracks.map((t) => `
+    <li>
+      <div class="track-info">
+        <div class="title">${esc(t.title)}</div>
+        <div class="meta">${esc(t.artist || "Onbekend")} · nog ${t.days_until_purge} dag${t.days_until_purge === 1 ? "" : "en"}</div>
+      </div>
+      <button class="btn-small" data-restore-track="${t.id}">Herstellen</button>
+    </li>
+  `).join("");
+}
+
+function openTrashModal() {
+  $("trash-modal").classList.remove("hidden");
+}
+
+function closeTrashModal() {
+  $("trash-modal").classList.add("hidden");
+}
+
+async function loadTrash() {
+  trashTracks = await api("/api/tracks/trash");
+  renderTrashModal();
+}
+
 function esc(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -163,6 +197,17 @@ async function loadData() {
   renderQueue();
 }
 
+$("trash-btn").addEventListener("click", async () => {
+  try {
+    await loadTrash();
+    openTrashModal();
+  } catch (err) {
+    alert(err.message || "Prullenbak laden mislukt");
+  }
+});
+$("trash-modal-close").addEventListener("click", closeTrashModal);
+$("trash-modal-backdrop").addEventListener("click", closeTrashModal);
+
 $("restart-btn").addEventListener("click", async () => {
   if (!confirm("Server afsluiten? run.sh doet daarna git pull en start de service opnieuw.")) return;
   try {
@@ -175,8 +220,12 @@ $("restart-btn").addEventListener("click", async () => {
 });
 
 $("btn-play").addEventListener("click", async () => {
-  if (status?.state === "playing") await api("/api/playback/pause", { method: "POST" });
-  else await api("/api/playback/play", { method: "POST" });
+  try {
+    if (status?.state === "playing") await api("/api/playback/pause", { method: "POST" });
+    else await api("/api/playback/play", { method: "POST" });
+  } catch (err) {
+    alert(err.message || "Afspelen mislukt");
+  }
 });
 $("btn-stop").addEventListener("click", () => api("/api/playback/stop", { method: "POST" }));
 $("btn-skip").addEventListener("click", () => api("/api/playback/skip", { method: "POST" }));
@@ -218,13 +267,42 @@ document.addEventListener("click", async (e) => {
     renderQueue();
   }
   if (t.dataset.deleteTrack) {
-    await api(`/api/tracks/${t.dataset.deleteTrack}`, { method: "DELETE" });
-    await loadData();
+    const track = tracks.find((tr) => tr.id === Number(t.dataset.deleteTrack));
+    const name = track?.title || "dit nummer";
+    if (!confirm(`"${name}" naar de prullenbak verplaatsen? Het nummer blijft een week bewaard.`)) return;
+    try {
+      await api(`/api/tracks/${t.dataset.deleteTrack}`, { method: "DELETE" });
+      await loadData();
+      if (!$("trash-modal").classList.contains("hidden")) await loadTrash();
+    } catch (err) {
+      alert(err.message || "Verwijderen mislukt");
+    }
+  }
+  if (t.dataset.restoreTrack) {
+    try {
+      await api(`/api/tracks/${t.dataset.restoreTrack}/restore`, { method: "POST" });
+      tracks = await api("/api/tracks");
+      renderTracks();
+      await loadTrash();
+    } catch (err) {
+      alert(err.message || "Herstellen mislukt");
+    }
+  }
+  if (t.dataset.playQueue) {
+    try {
+      await api(`/api/queue/${t.dataset.playQueue}/play`, { method: "POST" });
+    } catch (err) {
+      alert(err.message || "Afspelen mislukt");
+    }
   }
   if (t.dataset.removeQueue) {
-    await api(`/api/queue/${t.dataset.removeQueue}`, { method: "DELETE" });
-    status = await api("/api/playback/status");
-    renderQueue();
+    try {
+      await api(`/api/queue/${t.dataset.removeQueue}`, { method: "DELETE" });
+      status = await api("/api/playback/status");
+      renderQueue();
+    } catch (err) {
+      alert(err.message || "Verwijderen uit wachtrij mislukt");
+    }
   }
   if (t.dataset.playPl) {
     await api(`/api/playlists/${t.dataset.playPl}/play`, { method: "POST" });

@@ -4,6 +4,14 @@ import path from "node:path";
 import { config } from "./config.js";
 import * as playback from "./playback.js";
 import { readStore, updateStore } from "./store.js";
+import {
+  activeTracks,
+  daysUntilPurge,
+  moveTrackToTrash,
+  purgeExpiredTrash,
+  restoreTrack,
+  trashedTracks,
+} from "./trash.js";
 
 const ALLOWED_EXT = new Set([".mp3", ".flac", ".ogg", ".wav", ".m4a", ".opus", ".aac"]);
 
@@ -54,7 +62,7 @@ function playlistOut(store, p) {
     tracks: p.trackIds.map((trackId, position) => ({
       id: position,
       position,
-      track: store.tracks.find((t) => t.id === trackId),
+      track: store.tracks.find((t) => t.id === trackId && !t.deleted_at),
     })).filter((t) => t.track),
   };
 }
@@ -63,9 +71,23 @@ export async function handleApi(req, res, url) {
   const method = req.method;
   const pathname = url.pathname;
 
-  if (method === "GET" && pathname === "/api/tracks") {
+  if (method === "GET" && pathname === "/api/tracks/trash") {
+    await purgeExpiredTrash();
     const store = await readStore();
-    return json(res, 200, store.tracks);
+    return json(
+      res,
+      200,
+      trashedTracks(store).map((t) => ({
+        ...t,
+        days_until_purge: daysUntilPurge(t),
+      }))
+    );
+  }
+
+  if (method === "GET" && pathname === "/api/tracks") {
+    await purgeExpiredTrash();
+    const store = await readStore();
+    return json(res, 200, activeTracks(store));
   }
 
   if (method === "POST" && pathname === "/api/tracks/upload") {
@@ -105,19 +127,23 @@ export async function handleApi(req, res, url) {
     return json(res, 200, track);
   }
 
-  if (method === "DELETE" && pathname.startsWith("/api/tracks/")) {
+  if (method === "POST" && pathname.match(/^\/api\/tracks\/\d+\/restore$/)) {
+    const id = Number(pathname.split("/")[3]);
+    try {
+      await restoreTrack(id);
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, err.status || 500, { detail: err.message });
+    }
+  }
+
+  if (method === "DELETE" && pathname.match(/^\/api\/tracks\/\d+$/)) {
     const id = Number(pathname.split("/").pop());
     try {
-      await updateStore((store) => {
-        const idx = store.tracks.findIndex((t) => t.id === id);
-        if (idx === -1) throw Object.assign(new Error("Not found"), { status: 404 });
-        const [track] = store.tracks.splice(idx, 1);
-        fs.unlink(path.join(config.audioDir, track.filename)).catch(() => {});
-        store.queue = store.queue.filter((q) => q.trackId !== id);
-        store.playlists.forEach((p) => {
-          p.trackIds = p.trackIds.filter((tid) => tid !== id);
-        });
-      });
+      const store = await readStore();
+      const wasPlaying = store.playback.currentTrackId === id;
+      await moveTrackToTrash(id);
+      if (wasPlaying) await playback.stop();
       return noContent(res);
     } catch (err) {
       return json(res, err.status || 500, { detail: err.message });
@@ -132,9 +158,10 @@ export async function handleApi(req, res, url) {
   if (method === "POST" && pathname === "/api/queue") {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
     const item = await updateStore((store) => {
-      if (!store.tracks.some((t) => t.id === body.track_id)) {
+      if (!store.tracks.some((t) => t.id === body.track_id && !t.deleted_at)) {
         throw Object.assign(new Error("Track not found"), { status: 404 });
       }
+      store.playback.activePlaylistId = null;
       const position = body.position ?? store.queue.length;
       store.queue.forEach((q) => {
         if (q.position >= position) q.position += 1;
@@ -152,22 +179,36 @@ export async function handleApi(req, res, url) {
       return null;
     });
     if (!item) return;
+    await broadcastStatus();
     const status = await playback.getStatusPayload();
     const full = status.queue.find((q) => q.id === item.id);
     return json(res, 200, full);
   }
 
-  if (method === "DELETE" && pathname.startsWith("/api/queue/")) {
+  if (method === "POST" && pathname.match(/^\/api\/queue\/\d+\/play$/)) {
+    const id = Number(pathname.split("/")[3]);
+    try {
+      await playback.playQueueItemNow(id);
+      await broadcastStatus();
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, err.status || 500, { detail: err.message });
+    }
+  }
+
+  if (method === "DELETE" && pathname.match(/^\/api\/queue\/\d+$/)) {
     const id = Number(pathname.split("/").pop());
     try {
       await updateStore((store) => {
+        store.queue.sort((a, b) => a.position - b.position);
         const idx = store.queue.findIndex((q) => q.id === id);
         if (idx === -1) throw Object.assign(new Error("Not found"), { status: 404 });
-        const [removed] = store.queue.splice(idx, 1);
-        store.queue.forEach((q) => {
-          if (q.position > removed.position) q.position -= 1;
+        store.queue.splice(idx, 1);
+        store.queue.forEach((q, i) => {
+          q.position = i;
         });
       });
+      await broadcastStatus();
       return noContent(res);
     } catch (err) {
       return json(res, err.status || 500, { detail: err.message });
@@ -179,20 +220,36 @@ export async function handleApi(req, res, url) {
   }
 
   if (method === "POST" && pathname === "/api/playback/play") {
-    await playback.play();
-    return json(res, 200, { ok: true });
+    try {
+      await playback.play();
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, 503, { detail: err.message });
+    }
   }
   if (method === "POST" && pathname === "/api/playback/pause") {
-    await playback.pause();
-    return json(res, 200, { ok: true });
+    try {
+      await playback.pause();
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, 503, { detail: err.message });
+    }
   }
   if (method === "POST" && pathname === "/api/playback/stop") {
-    await playback.stop();
-    return json(res, 200, { ok: true });
+    try {
+      await playback.stop();
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, 503, { detail: err.message });
+    }
   }
   if (method === "POST" && pathname === "/api/playback/skip") {
-    await playback.skip();
-    return json(res, 200, { ok: true });
+    try {
+      await playback.skip();
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, 503, { detail: err.message });
+    }
   }
   if (method === "PUT" && pathname === "/api/playback/volume") {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
@@ -264,8 +321,12 @@ export async function handleApi(req, res, url) {
     if (!store.playlists.some((p) => p.id === id)) {
       return json(res, 404, { detail: "Not found" });
     }
-    await playback.playPlaylist(id);
-    return json(res, 200, { ok: true });
+    try {
+      await playback.playPlaylist(id);
+      return json(res, 200, { ok: true });
+    } catch (err) {
+      return json(res, 503, { detail: err.message });
+    }
   }
 
   if (method === "POST" && pathname === "/api/admin/restart") {

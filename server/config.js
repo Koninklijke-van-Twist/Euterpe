@@ -30,10 +30,32 @@ function loadEnvFile() {
 
 loadEnvFile();
 
-function defaultMpvPath() {
-  if (process.env.EUTERPE_MPV_PATH) return process.env.EUTERPE_MPV_PATH;
-  // Windows: mpvnet (libmpv) is gebruikelijker dan mpv in PATH
-  return process.platform === "win32" ? "mpvnet" : "mpv";
+function resolveMpvPath() {
+  const configured = process.env.EUTERPE_MPV_PATH;
+  const looksLikePath =
+    configured &&
+    (configured.includes(path.sep) ||
+      configured.includes("/") ||
+      configured.toLowerCase().endsWith(".exe"));
+
+  if (looksLikePath) {
+    if (fs.existsSync(configured)) return configured;
+    return configured;
+  }
+
+  const name = configured || (process.platform === "win32" ? "mpvnet" : "mpv");
+
+  if (process.platform === "win32" && (name === "mpvnet" || name === "mpv.net")) {
+    const candidates = [
+      path.join(process.env.LOCALAPPDATA || "", "Programs", "mpv.net", "mpvnet.exe"),
+      path.join(process.env.ProgramFiles || "", "mpv.net", "mpvnet.exe"),
+    ];
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) return candidate;
+    }
+  }
+
+  return name;
 }
 
 export const config = {
@@ -41,7 +63,7 @@ export const config = {
   secret: process.env.EUTERPE_SECRET || "change-me-in-production",
   dataDir: process.env.EUTERPE_DATA_DIR || path.join(root, "data"),
   audioDir: process.env.EUTERPE_AUDIO_DIR || path.join(root, "data", "audio"),
-  mpvPath: defaultMpvPath(),
+  mpvPath: resolveMpvPath(),
   mpvSocket: process.env.EUTERPE_MPV_SOCKET || path.join(root, "data", "mpv.sock"),
   publicDir: path.join(root, "public"),
   isWindows: process.platform === "win32",
