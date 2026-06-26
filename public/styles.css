@@ -480,6 +480,15 @@ input:focus {
   text-align: center;
 }
 
+.commit-sha {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  opacity: 0.65;
+}
+
 .empty-state { text-align: center; color: var(--text-muted); padding: 2rem 1rem; font-style: italic; }
 
 .playlist-create { display: flex; gap: 0.5rem; margin-bottom: 1rem; }

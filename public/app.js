@@ -287,6 +287,22 @@ function initDialog() {
   $("dialog-ok").addEventListener("click", () => finishDialog(true));
 }
 
+async function loadVersion() {
+  try {
+    const { commit } = await api("/api/version");
+    const el = $("commit-sha");
+    if (commit) {
+      el.textContent = commit;
+      el.title = `Commit ${commit}`;
+      el.classList.remove("hidden");
+    } else {
+      el.classList.add("hidden");
+    }
+  } catch {
+    $("commit-sha").classList.add("hidden");
+  }
+}
+
 async function loadData() {
   [tracks, playlists, status] = await Promise.all([
     api("/api/tracks"),
@@ -297,6 +313,7 @@ async function loadData() {
   renderPlaylists();
   renderPlayer();
   renderQueue();
+  await loadVersion();
 }
 
 $("trash-btn").addEventListener("click", async () => {

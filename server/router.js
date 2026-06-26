@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import * as playback from "./playback.js";
 import { shouldAutoPlayOnEnqueue, assertManualQueueAllowed, formatQueueItem } from "./queue-helpers.js";
 import { readStore, updateStore } from "./store.js";
+import { getCachedCommitSha } from "./version.js";
 import {
   activeTracks,
   daysUntilPurge,
@@ -337,6 +338,11 @@ export async function handleApi(req, res, url) {
     } catch (err) {
       return json(res, 503, { detail: err.message });
     }
+  }
+
+  if (method === "GET" && pathname === "/api/version") {
+    const commit = getCachedCommitSha();
+    return json(res, 200, { commit });
   }
 
   if (method === "POST" && pathname === "/api/admin/restart") {
