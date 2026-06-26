@@ -1,5 +1,5 @@
-/** @param {{ ipc: string, isWindows: boolean, mpvAo: string | null, mpvExtraArgs: string[] }} opts */
-export function buildMpvArgs({ ipc, isWindows, mpvAo, mpvExtraArgs }) {
+/** @param {{ ipc: string, isWindows: boolean, mpvAo: string | null, mpvAudioDevice: string | null, mpvExtraArgs: string[] }} opts */
+export function buildMpvArgs({ ipc, isWindows, mpvAo, mpvAudioDevice, mpvExtraArgs }) {
   const args = [
     ...(isWindows ? ["--process-instance=multi"] : []),
     "--idle=yes",
@@ -10,8 +10,10 @@ export function buildMpvArgs({ ipc, isWindows, mpvAo, mpvExtraArgs }) {
     "--volume=75",
     "--no-video",
     "--force-window=no",
+    "--pause=no",
   ];
   if (mpvAo) args.push(`--ao=${mpvAo}`);
+  if (mpvAudioDevice) args.push(`--audio-device=${mpvAudioDevice}`);
   if (mpvExtraArgs.length) args.push(...mpvExtraArgs);
   return args;
 }

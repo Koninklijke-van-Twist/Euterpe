@@ -103,6 +103,11 @@ function resolveMpvExtraArgs() {
   return raw.trim().split(/\s+/);
 }
 
+function resolveMpvAudioDevice() {
+  const v = process.env.EUTERPE_MPV_AUDIO_DEVICE?.trim();
+  return v || null;
+}
+
 const listenPorts = parseListenPorts();
 
 export const config = {
@@ -113,6 +118,7 @@ export const config = {
   audioDir: process.env.EUTERPE_AUDIO_DIR || path.join(root, "data", "audio"),
   mpvPath: resolveMpvPath(),
   mpvAo: resolveMpvAo(),
+  mpvAudioDevice: resolveMpvAudioDevice(),
   mpvExtraArgs: resolveMpvExtraArgs(),
   mpvSocket: process.env.EUTERPE_MPV_SOCKET || path.join(root, "data", "mpv.sock"),
   publicDir: path.join(root, "public"),

@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { config } from "./config.js";
 import { buildMpvArgs, isBenignMpvStderr } from "./mpv-args.js";
+import { playbackStartErrorHint, playbackStartReady } from "./playback-start.js";
 
 class MPVClient {
   constructor() {
@@ -55,6 +56,7 @@ class MPVClient {
       ipc,
       isWindows: config.isWindows,
       mpvAo: config.mpvAo,
+      mpvAudioDevice: config.mpvAudioDevice,
       mpvExtraArgs: config.mpvExtraArgs,
     });
   }
@@ -121,6 +123,20 @@ class MPVClient {
     await this.command("observe_property", 2, "duration");
     await this.command("observe_property", 3, "pause");
     await this.command("observe_property", 4, "volume");
+    await this.logAudioInfo();
+  }
+
+  async logAudioInfo() {
+    try {
+      const [ao, device, paused] = await Promise.all([
+        this.getProperty("current-ao"),
+        this.getProperty("audio-device"),
+        this.getProperty("pause"),
+      ]);
+      console.log(`mpv audio: ao=${ao ?? "?"} device=${device ?? "?"} pause=${paused}`);
+    } catch (err) {
+      console.warn("mpv audio info niet beschikbaar:", err.message);
+    }
   }
 
   connect() {
@@ -223,6 +239,49 @@ class MPVClient {
       }
       throw new Error("Audio engine laadde het bestand niet op tijd");
     }
+  }
+
+  async startPlayback(filePath, fallbackDuration = 0) {
+    const resolved = path.resolve(filePath);
+    try {
+      const idle = await this.getProperty("idle-active");
+      if (!idle) {
+        await this.stop();
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    } catch {
+      /* stop mislukt — probeer toch te laden */
+    }
+
+    await this.loadFile(resolved);
+    try {
+      await this.seek(0, "absolute");
+    } catch {
+      /* seek kan falen tijdens laden */
+    }
+
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      await this.pause(false);
+      await new Promise((r) => setTimeout(r, 120));
+      try {
+        const [pos, dur, isPaused] = await Promise.all([
+          this.getProperty("time-pos"),
+          this.getProperty("duration"),
+          this.getProperty("pause"),
+        ]);
+        const position = Number(pos) || 0;
+        const parsedDur = Number(dur);
+        const duration =
+          Number.isFinite(parsedDur) && parsedDur > 0 ? parsedDur : Number(fallbackDuration) || 0;
+        if (playbackStartReady({ position, duration, paused: Boolean(isPaused) })) {
+          return { position, duration, paused: false };
+        }
+      } catch (err) {
+        if (err.message.includes("Afspelen start niet")) throw err;
+      }
+    }
+    throw new Error(playbackStartErrorHint());
   }
 
   async seek(seconds, mode = "absolute") {

@@ -226,19 +226,11 @@ async function playTrack(track) {
     }
   }
 
-  const file = trackPath(track);
-  await mpv.loadFile(file);
-  await mpv.pause(false);
+  const started = await mpv.startPlayback(trackPath(track), track.duration ?? 0);
+  position = started.position;
+  duration = started.duration;
   paused = false;
   playStartedAt = Date.now();
-
-  try {
-    position = Number((await mpv.getProperty("time-pos")) ?? 0);
-    duration = Number((await mpv.getProperty("duration")) ?? track.duration ?? 0);
-  } catch {
-    position = 0;
-    duration = track.duration ?? 0;
-  }
 
   if (duration > 0) saveTrackDuration(track.id, duration);
 
@@ -405,34 +397,11 @@ async function switchToTrack(track) {
     throw new Error("Audio-engine niet verbonden");
   }
 
-  try {
-    const idle = await mpv.getProperty("idle-active");
-    if (!idle) {
-      await mpv.stop();
-      await new Promise((r) => setTimeout(r, 150));
-    }
-  } catch {
-    /* stop mislukt — probeer toch te laden */
-  }
-
-  const file = trackPath(track);
-  await mpv.loadFile(file);
-  try {
-    await mpv.seek(0, "absolute");
-  } catch {
-    /* seek kan falen tijdens laden */
-  }
-  await mpv.pause(false);
+  const started = await mpv.startPlayback(trackPath(track), track.duration ?? 0);
+  position = started.position;
+  duration = started.duration;
   paused = false;
   playStartedAt = Date.now();
-
-  try {
-    position = Number((await mpv.getProperty("time-pos")) ?? 0);
-    duration = Number((await mpv.getProperty("duration")) ?? track.duration ?? 0);
-  } catch {
-    position = 0;
-    duration = track.duration ?? 0;
-  }
 
   if (duration > 0) saveTrackDuration(track.id, duration);
 
