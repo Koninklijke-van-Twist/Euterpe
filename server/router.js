@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 import * as playback from "./playback.js";
+import { shouldAutoPlayOnEnqueue } from "./queue-helpers.js";
 import { readStore, updateStore } from "./store.js";
 import {
   activeTracks,
@@ -157,10 +158,12 @@ export async function handleApi(req, res, url) {
 
   if (method === "POST" && pathname === "/api/queue") {
     const body = JSON.parse((await readBody(req)).toString("utf8"));
+    let autoPlay = false;
     const item = await updateStore((store) => {
       if (!store.tracks.some((t) => t.id === body.track_id && !t.deleted_at)) {
         throw Object.assign(new Error("Track not found"), { status: 404 });
       }
+      autoPlay = shouldAutoPlayOnEnqueue(store);
       store.playback.activePlaylistId = null;
       const position = body.position ?? store.queue.length;
       store.queue.forEach((q) => {
@@ -179,6 +182,13 @@ export async function handleApi(req, res, url) {
       return null;
     });
     if (!item) return;
+    if (autoPlay) {
+      try {
+        await playback.play();
+      } catch (err) {
+        console.warn("Auto-play na wachtrij mislukt:", err.message);
+      }
+    }
     await broadcastStatus();
     const status = await playback.getStatusPayload();
     const full = status.queue.find((q) => q.id === item.id);
