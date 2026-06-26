@@ -3,7 +3,6 @@ let playlists = [];
 let trashTracks = [];
 let status = null;
 let editingPlaylist = null;
-let selectedTrackIds = [];
 let playlistPickerTrackId = null;
 let eventSource = null;
 let suppressQueueSseUntil = 0;
@@ -189,26 +188,45 @@ function renderPlaylistEditor() {
   const editor = $("playlist-editor");
   if (!editingPlaylist) { editor.classList.add("hidden"); return; }
   editor.classList.remove("hidden");
+  const entries = editingPlaylist.tracks.filter((entry) => entry.track);
   editor.innerHTML = `
     <h3>Bewerk: ${esc(editingPlaylist.name)}</h3>
     <ul class="track-list editor-list">
-      ${tracks.map((t) => `
+      ${entries.length ? entries.map(({ track: t }) => `
         <li>
-          <label class="checkbox-row">
-            <input type="checkbox" data-pl-track="${t.id}" ${selectedTrackIds.includes(t.id) ? "checked" : ""} />
-            <div class="track-info">
-              <div class="title">${esc(t.title)}</div>
-              <div class="meta">${esc(t.artist || "Onbekend")}</div>
-            </div>
-          </label>
+          <div class="track-info">
+            <div class="title">${esc(t.title)}</div>
+            <div class="meta">${esc(t.artist || "Onbekend")}</div>
+          </div>
+          <button type="button" class="btn-danger" data-pl-remove="${t.id}" title="Uit afspeellijst">✕</button>
         </li>
-      `).join("")}
+      `).join("") : '<li class="empty-state">Geen nummers — voeg toe via + in de bibliotheek</li>'}
     </ul>
     <div class="track-actions editor-actions">
-      <button class="btn-primary" id="save-pl-edit">Opslaan</button>
-      <button class="btn-secondary" id="cancel-pl-edit">Annuleren</button>
+      <button type="button" class="btn-secondary" id="close-pl-edit">Sluiten</button>
     </div>
   `;
+}
+
+async function removeTrackFromPlaylistEditor(trackId) {
+  if (!editingPlaylist) return;
+  const playlistId = editingPlaylist.id;
+  const trackIds = playlistTrackIds(editingPlaylist).filter((id) => id !== trackId);
+  try {
+    await api(`/api/playlists/${playlistId}`, {
+      method: "PUT",
+      body: JSON.stringify({ track_ids: trackIds }),
+    });
+    playlists = await api("/api/playlists");
+    editingPlaylist = playlists.find((p) => p.id === playlistId) || null;
+    renderPlaylists();
+    renderPlaylistEditor();
+    if (!$("playlist-picker-modal").classList.contains("hidden") && playlistPickerTrackId) {
+      renderPlaylistPickerModal();
+    }
+  } catch (err) {
+    await showAlert(err.message || "Nummer verwijderen mislukt");
+  }
 }
 
 function renderTrashModal() {
@@ -294,7 +312,6 @@ async function toggleTrackInPlaylist(playlistId, checked) {
     playlists = await api("/api/playlists");
     if (editingPlaylist?.id === playlistId) {
       editingPlaylist = playlists.find((p) => p.id === playlistId) || null;
-      if (editingPlaylist) selectedTrackIds = playlistTrackIds(editingPlaylist);
       renderPlaylistEditor();
     }
     renderPlaylists();
@@ -512,6 +529,12 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
+  const plRemoveEl = clickTarget(e, "[data-pl-remove]");
+  if (plRemoveEl?.dataset.plRemove) {
+    await removeTrackFromPlaylistEditor(Number(plRemoveEl.dataset.plRemove));
+    return;
+  }
+
   const t = e.target;
   if (!(t instanceof HTMLElement)) return;
 
@@ -547,7 +570,6 @@ document.addEventListener("click", async (e) => {
   }
   if (t.dataset.editPl) {
     editingPlaylist = playlists.find((p) => p.id === Number(t.dataset.editPl));
-    selectedTrackIds = editingPlaylist.tracks.map((t) => t.track.id);
     renderPlaylistEditor();
   }
   if (t.dataset.deletePl) {
@@ -555,17 +577,7 @@ document.addEventListener("click", async (e) => {
     playlists = await api("/api/playlists");
     renderPlaylists();
   }
-  if (t.id === "save-pl-edit") {
-    await api(`/api/playlists/${editingPlaylist.id}`, {
-      method: "PUT",
-      body: JSON.stringify({ track_ids: selectedTrackIds }),
-    });
-    editingPlaylist = null;
-    playlists = await api("/api/playlists");
-    renderPlaylists();
-    renderPlaylistEditor();
-  }
-  if (t.id === "cancel-pl-edit") {
+  if (t.id === "close-pl-edit") {
     editingPlaylist = null;
     renderPlaylistEditor();
   }
@@ -575,12 +587,6 @@ document.addEventListener("change", (e) => {
   const t = e.target;
   if (t instanceof HTMLInputElement && t.dataset.plPicker) {
     toggleTrackInPlaylist(Number(t.dataset.plPicker), t.checked);
-    return;
-  }
-  if (t instanceof HTMLInputElement && t.dataset.plTrack) {
-    const id = Number(t.dataset.plTrack);
-    if (t.checked) selectedTrackIds.push(id);
-    else selectedTrackIds = selectedTrackIds.filter((x) => x !== id);
   }
 });
 

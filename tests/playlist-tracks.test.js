@@ -68,4 +68,11 @@ describe("playlist picker ui", () => {
     assert.match(src, /data-add-to-playlists/);
     assert.match(src, /data-pl-picker/);
   });
+
+  it("playlist editor lists members with remove buttons only", () => {
+    const src = fs.readFileSync(path.join(root, "public/app.js"), "utf8");
+    assert.match(src, /data-pl-remove/);
+    assert.doesNotMatch(src, /data-pl-track/);
+    assert.doesNotMatch(src, /save-pl-edit/);
+  });
 });
