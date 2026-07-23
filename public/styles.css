@@ -448,6 +448,43 @@ input:focus {
   background: rgba(201, 162, 39, 0.08);
 }
 
+.library-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.library-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.library-filter-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.library-filters select,
+.library-filters input[type="search"] {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+}
+
+.library-filters select:focus,
+.library-filters input[type="search"]:focus {
+  outline: 2px solid var(--gold-dim);
+  outline-offset: 1px;
+}
+
 .status-badge {
   display: inline-block;
   padding: 0.2rem 0.6rem;

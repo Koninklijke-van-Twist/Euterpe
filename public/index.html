@@ -49,6 +49,18 @@
           <input type="file" id="file-input" accept="audio/*" multiple hidden />
           Sleep audiobestanden hierheen of klik om te uploaden
         </div>
+        <div class="library-filters">
+          <label class="library-filter-field">
+            <span class="library-filter-label">Auteur</span>
+            <select id="library-artist-filter" aria-label="Filter op auteur">
+              <option value="">Alle auteurs</option>
+            </select>
+          </label>
+          <label class="library-filter-field">
+            <span class="library-filter-label">Zoeken</span>
+            <input type="search" id="library-search" placeholder="Zoek in bibliotheek…" autocomplete="off" aria-label="Zoek in bibliotheek" />
+          </label>
+        </div>
         <ul class="track-list" id="track-list"></ul>
       </section>
       <section class="panel">
@@ -127,6 +139,6 @@
     </div>
   </div>
 
-  <script type="module" src="/app.js?v=13"></script>
+  <script type="module" src="/app.js?v=14"></script>
 </body>
 </html>

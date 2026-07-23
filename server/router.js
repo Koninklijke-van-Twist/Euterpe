@@ -22,6 +22,7 @@ import {
   restoreTrack,
   trashedTracks,
 } from "./trash.js";
+import { extractTrackMetadata } from "./track-metadata.js";
 
 const ALLOWED_EXT = new Set([".mp3", ".flac", ".ogg", ".wav", ".m4a", ".opus", ".aac"]);
 
@@ -117,16 +118,16 @@ export async function handleApi(req, res, url) {
     const filename = `${crypto.randomBytes(16).toString("hex")}${ext}`;
     await fs.writeFile(path.join(config.audioDir, filename), filePart.body);
 
-    const title = path.basename(filePart.filename, ext);
+    const meta = extractTrackMetadata(filePart.body, filePart.filename);
     const track = await updateStore((store) => {
       const id = store.meta.nextTrackId++;
       const t = {
         id,
         filename,
         original_name: filePart.filename,
-        title,
-        artist: null,
-        album: null,
+        title: meta.title,
+        artist: meta.artist,
+        album: meta.album,
         duration: null,
         file_size: filePart.body.length,
         created_at: new Date().toISOString(),

@@ -1,4 +1,5 @@
 import { overallUploadProgress } from "./upload-progress.js";
+import { filterLibraryTracks, uniqueArtists } from "./library-filter.js";
 
 let tracks = [];
 let playlists = [];
@@ -9,6 +10,8 @@ let playlistPickerTrackId = null;
 let eventSource = null;
 let suppressQueueSseUntil = 0;
 let uploadInProgress = false;
+let libraryArtistFilter = "";
+let librarySearchQuery = "";
 
 function isPlaylistMode() {
   return status?.active_playlist_id != null;
@@ -111,6 +114,23 @@ function renderPlayer() {
   $("btn-stop").title = playlistActive ? "Stop afspeellijst" : "Stop";
 }
 
+function renderArtistFilter() {
+  const select = $("library-artist-filter");
+  if (!select) return;
+  const artists = uniqueArtists(tracks);
+  const previous = libraryArtistFilter;
+  select.innerHTML =
+    `<option value="">Alle auteurs</option>` +
+    artists.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
+  if (previous && artists.includes(previous)) {
+    select.value = previous;
+    libraryArtistFilter = previous;
+  } else {
+    select.value = "";
+    libraryArtistFilter = "";
+  }
+}
+
 function renderTracks() {
   const list = $("track-list");
   const manualBlocked = isPlaylistMode();
@@ -118,7 +138,17 @@ function renderTracks() {
     list.innerHTML = '<li class="empty-state">Nog geen nummers geüpload</li>';
     return;
   }
-  list.innerHTML = tracks.map((t) => `
+  const filtered = filterLibraryTracks(tracks, {
+    artist: libraryArtistFilter,
+    query: librarySearchQuery,
+    formatTime,
+    formatBytes,
+  });
+  if (!filtered.length) {
+    list.innerHTML = '<li class="empty-state">Geen nummers gevonden</li>';
+    return;
+  }
+  list.innerHTML = filtered.map((t) => `
     <li>
       <div class="track-info">
         <div class="title">${esc(t.title)}</div>
@@ -400,12 +430,22 @@ async function loadData() {
     api("/api/playlists"),
     api("/api/playback/status"),
   ]);
+  renderArtistFilter();
   renderTracks();
   renderPlaylists();
   renderPlayer();
   renderQueue();
   await loadVersion();
 }
+
+$("library-artist-filter").addEventListener("change", (e) => {
+  libraryArtistFilter = e.target.value;
+  renderTracks();
+});
+$("library-search").addEventListener("input", (e) => {
+  librarySearchQuery = e.target.value;
+  renderTracks();
+});
 
 $("trash-btn").addEventListener("click", async () => {
   try {
@@ -559,6 +599,7 @@ async function uploadFiles(fileList) {
       });
     }
     tracks = await api("/api/tracks");
+    renderArtistFilter();
     renderTracks();
     closeUploadModal();
   } catch (err) {
