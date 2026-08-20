@@ -461,6 +461,29 @@ $("trash-modal-backdrop").addEventListener("click", closeTrashModal);
 $("playlist-picker-close").addEventListener("click", closePlaylistPicker);
 $("playlist-picker-backdrop").addEventListener("click", closePlaylistPicker);
 
+$("upload-playlist-choice").addEventListener("change", syncUploadPlaylistChoiceUi);
+$("upload-playlist-cancel").addEventListener("click", () => finishUploadPlaylistPrompt(null));
+$("upload-playlist-backdrop").addEventListener("click", () => finishUploadPlaylistPrompt(null));
+$("upload-playlist-confirm").addEventListener("click", () => {
+  const mode = $("upload-playlist-choice").value;
+  if (mode === "existing") {
+    const playlistId = Number($("upload-playlist-existing").value);
+    finishUploadPlaylistPrompt({
+      mode: "existing",
+      playlistId: Number.isFinite(playlistId) ? playlistId : null,
+    });
+    return;
+  }
+  if (mode === "new") {
+    finishUploadPlaylistPrompt({
+      mode: "new",
+      name: $("upload-playlist-new-name").value.trim(),
+    });
+    return;
+  }
+  finishUploadPlaylistPrompt({ mode: "none" });
+});
+
 $("restart-btn").addEventListener("click", async () => {
   const ok = await showConfirm(
     "Server afsluiten? run.sh doet daarna git pull en start de service opnieuw.",
@@ -531,6 +554,70 @@ function closeUploadModal() {
   $("upload-modal").classList.add("hidden");
 }
 
+let uploadPlaylistResolve = null;
+
+function syncUploadPlaylistChoiceUi() {
+  const choice = $("upload-playlist-choice").value;
+  $("upload-playlist-existing-wrap").classList.toggle("hidden", choice !== "existing");
+  $("upload-playlist-new-wrap").classList.toggle("hidden", choice !== "new");
+}
+
+function finishUploadPlaylistPrompt(result) {
+  $("upload-playlist-modal").classList.add("hidden");
+  const resolve = uploadPlaylistResolve;
+  uploadPlaylistResolve = null;
+  if (resolve) resolve(result);
+}
+
+function askUploadPlaylistDestination(fileCount) {
+  return new Promise((resolve) => {
+    uploadPlaylistResolve = resolve;
+    $("upload-playlist-title").textContent = `${fileCount} nummers uploaden`;
+    $("upload-playlist-choice").value = "none";
+    $("upload-playlist-new-name").value = "";
+    const select = $("upload-playlist-existing");
+    if (!playlists.length) {
+      select.innerHTML = '<option value="">Geen afspeellijsten</option>';
+      select.disabled = true;
+    } else {
+      select.disabled = false;
+      select.innerHTML = playlists
+        .map((pl) => `<option value="${pl.id}">${esc(pl.name)}</option>`)
+        .join("");
+    }
+    syncUploadPlaylistChoiceUi();
+    $("upload-playlist-modal").classList.remove("hidden");
+    $("upload-playlist-confirm").focus();
+  });
+}
+
+async function applyUploadedTracksToPlaylist(uploadedTracks, destination) {
+  if (!destination || destination.mode === "none" || !uploadedTracks.length) return;
+  const trackIds = uploadedTracks.map((t) => t.id).filter((id) => Number.isFinite(id));
+  if (!trackIds.length) return;
+
+  if (destination.mode === "existing") {
+    const pl = playlists.find((p) => p.id === destination.playlistId);
+    if (!pl) throw new Error("Afspeellijst niet gevonden");
+    const merged = [...new Set([...playlistTrackIds(pl), ...trackIds])];
+    await api(`/api/playlists/${destination.playlistId}`, {
+      method: "PUT",
+      body: JSON.stringify({ track_ids: merged }),
+    });
+  } else if (destination.mode === "new") {
+    const created = await api("/api/playlists", {
+      method: "POST",
+      body: JSON.stringify({ name: destination.name }),
+    });
+    await api(`/api/playlists/${created.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ track_ids: trackIds }),
+    });
+  }
+  playlists = await api("/api/playlists");
+  renderPlaylists();
+}
+
 function uploadFileWithProgress(file, onFileProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -566,15 +653,35 @@ async function uploadFiles(fileList) {
   const files = Array.from(fileList).filter((f) => f?.size >= 0);
   if (!files.length) return;
 
+  let destination = { mode: "none" };
+  if (files.length > 1) {
+    destination = await askUploadPlaylistDestination(files.length);
+    if (!destination) {
+      fileInput.value = "";
+      return;
+    }
+    if (destination.mode === "existing" && !destination.playlistId) {
+      await showAlert("Kies een bestaande afspeellijst.", "Uploaden");
+      fileInput.value = "";
+      return;
+    }
+    if (destination.mode === "new" && !destination.name) {
+      await showAlert("Vul een naam in voor de nieuwe afspeellijst.", "Uploaden");
+      fileInput.value = "";
+      return;
+    }
+  }
+
   uploadInProgress = true;
   openUploadModal(files.length);
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
   let uploadedBytes = 0;
+  const uploadedTracks = [];
 
   try {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      await uploadFileWithProgress(file, (fileFraction) => {
+      const track = await uploadFileWithProgress(file, (fileFraction) => {
         const fraction = overallUploadProgress(
           uploadedBytes,
           totalBytes,
@@ -590,6 +697,7 @@ async function uploadFiles(fileList) {
           fraction,
         });
       });
+      if (track) uploadedTracks.push(track);
       uploadedBytes += file.size;
       updateUploadModal({
         fileName: file.name,
@@ -598,6 +706,7 @@ async function uploadFiles(fileList) {
         fraction: overallUploadProgress(uploadedBytes, totalBytes, file.size, 1, i, files.length),
       });
     }
+    await applyUploadedTracksToPlaylist(uploadedTracks, destination);
     tracks = await api("/api/tracks");
     renderArtistFilter();
     renderTracks();

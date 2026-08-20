@@ -39,4 +39,12 @@ describe("upload modal ui", () => {
     const src = fs.readFileSync(path.join(root, "public/app.js"), "utf8");
     assert.equal((src.match(/\blet suppressQueueSseUntil\b/g) || []).length, 1);
   });
+
+  it("multi-file upload asks for playlist destination", () => {
+    const html = fs.readFileSync(path.join(root, "public/index.html"), "utf8");
+    const src = fs.readFileSync(path.join(root, "public/app.js"), "utf8");
+    assert.match(html, /id="upload-playlist-modal"/);
+    assert.match(src, /askUploadPlaylistDestination/);
+    assert.match(src, /applyUploadedTracksToPlaylist/);
+  });
 });

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 import { readStore, updateStore } from "./store.js";
+import { removeTrackIdFromAllPlaylists } from "./playlist-helpers.js";
 
 export const TRASH_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -73,6 +74,7 @@ export async function moveTrackToTrash(trackId) {
     if (!track) throw Object.assign(new Error("Not found"), { status: 404 });
     track.deleted_at = now;
     store.queue = store.queue.filter((q) => q.trackId !== trackId);
+    removeTrackIdFromAllPlaylists(store, trackId);
     if (store.playback.currentTrackId === trackId) {
       store.playback.currentTrackId = null;
       store.playback.state = "stopped";

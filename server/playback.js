@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { config } from "./config.js";
 import { mpv } from "./mpv.js";
 import { hasTrackEnded } from "./playback-end.js";
@@ -11,6 +12,11 @@ import {
   removeQueueItemById,
 } from "./queue-helpers.js";
 import { withPlaybackLock } from "./playback-lock.js";
+import {
+  playablePlaylistTrackIds,
+  pruneUnplayablePlaylistTracks,
+  removeTrackIdFromAllPlaylists,
+} from "./playlist-helpers.js";
 import { shuffleWithSpacing } from "./shuffle.js";
 import { readStore, updateStore, mutateStore, flushStore } from "./store.js";
 
@@ -129,13 +135,21 @@ function trackPath(track) {
   return path.join(config.audioDir, track.filename);
 }
 
+function trackFileMissing(track) {
+  if (!track?.filename) return true;
+  return !fs.existsSync(trackPath(track));
+}
+
 function reshufflePlaylist(store) {
+  pruneUnplayablePlaylistTracks(store);
   const playlist = store.playlists.find((p) => p.id === store.playback.activePlaylistId);
-  if (!playlist?.trackIds?.length) {
+  const playableIds = playablePlaylistTrackIds(store, playlist);
+  if (!playableIds.length) {
     store.playback.activePlaylistId = null;
+    store.queue = [];
     return;
   }
-  const order = shuffleWithSpacing(playlist.trackIds, store.playback.shuffleHistory || []);
+  const order = shuffleWithSpacing(playableIds, store.playback.shuffleHistory || []);
   store.playback.shuffleHistory = order;
   store.queue = order.map((trackId, position) => ({
     id: store.meta.nextQueueId++,
@@ -143,6 +157,139 @@ function reshufflePlaylist(store) {
     position,
     addedAt: new Date().toISOString(),
   }));
+}
+
+async function takeNextPlayableTrack() {
+  let nextTrack = null;
+  let inPlaylistMode = false;
+  await updateStore((store) => {
+    pruneUnplayablePlaylistTracks(store);
+    inPlaylistMode = Boolean(store.playback.activePlaylistId);
+    store.playback.currentTrackId = null;
+    store.playback.position = 0;
+    store.playback.state = "stopped";
+    nextTrack = popNextFromQueue(store);
+    if (!nextTrack && inPlaylistMode) {
+      reshufflePlaylist(store);
+      nextTrack = popNextFromQueue(store);
+      inPlaylistMode = Boolean(store.playback.activePlaylistId);
+    }
+  });
+  return { nextTrack, inPlaylistMode };
+}
+
+async function stopPlaybackIdle(inPlaylistMode) {
+  stopPositionPoll();
+  if (playbackFlushTimer) {
+    clearTimeout(playbackFlushTimer);
+    playbackFlushTimer = null;
+  }
+  if (mpv.connected) {
+    try {
+      await mpv.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+  paused = true;
+  position = 0;
+  playStartedAt = 0;
+  await updateStore((store) => {
+    store.playback.currentTrackId = null;
+    store.playback.state = "stopped";
+    store.playback.position = 0;
+    if (!inPlaylistMode) store.playback.activePlaylistId = null;
+  });
+  await notify();
+}
+
+async function playTrack(track) {
+  if (!mpv.connected) {
+    throw new Error("Audio-engine niet verbonden — herstart de server en controleer EUTERPE_MPV_PATH");
+  }
+  if (!track || track.deleted_at) {
+    throw Object.assign(new Error("Nummer niet beschikbaar"), { code: "TRACK_GONE" });
+  }
+  if (trackFileMissing(track)) {
+    throw Object.assign(new Error(`Audiobestand ontbreekt: ${track.filename}`), {
+      code: "TRACK_FILE_MISSING",
+    });
+  }
+
+  const store = await readStore();
+  if (store.playback.currentTrackId != null && store.playback.state === "playing" && !paused) {
+    try {
+      await mpv.pause(true);
+    } catch {
+      /* mpv kan bezig zijn */
+    }
+  }
+
+  const started = await mpv.startPlayback(trackPath(track), track.duration ?? 0);
+  position = started.position;
+  duration = started.duration;
+  paused = false;
+  playStartedAt = Date.now();
+
+  if (duration > 0) saveTrackDuration(track.id, duration);
+
+  await updateStore((store) => {
+    store.playback.currentTrackId = track.id;
+    store.playback.state = "playing";
+    store.playback.position = position;
+    store.playback.duration = duration;
+  });
+
+  startPositionPoll();
+  await notify();
+}
+
+async function discardBrokenTrack(trackId) {
+  await updateStore((store) => {
+    removeTrackIdFromAllPlaylists(store, trackId);
+    store.queue = store.queue.filter((q) => q.trackId !== trackId);
+    store.queue.forEach((q, i) => {
+      q.position = i;
+    });
+  });
+}
+
+/** Speel track; bij fout overslaan en doorgaan. True als er iets speelt. */
+async function playTrackSkippingErrors(track, { inPlaylistMode = false } = {}) {
+  const maxAttempts = 50;
+  let current = track;
+  let playlistMode = inPlaylistMode;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (!current) {
+      await stopPlaybackIdle(playlistMode);
+      return false;
+    }
+    try {
+      await playTrack(current);
+      return true;
+    } catch (err) {
+      console.warn(`[euterpe] nummer overslaan (id=${current.id}): ${err.message}`);
+      await discardBrokenTrack(current.id);
+      const next = await takeNextPlayableTrack();
+      current = next.nextTrack;
+      playlistMode = next.inPlaylistMode;
+    }
+  }
+  await stopPlaybackIdle(playlistMode);
+  return false;
+}
+
+async function onTrackFinished() {
+  if (isManualQueueOp() || finishingTrack) return;
+
+  finishingTrack = true;
+  try {
+    const { nextTrack, inPlaylistMode } = await takeNextPlayableTrack();
+    await playTrackSkippingErrors(nextTrack, { inPlaylistMode });
+  } finally {
+    finishingTrack = false;
+  }
 }
 
 export function attachMpvEvents() {
@@ -212,82 +359,6 @@ async function mpvHasLoadedFile() {
   }
 }
 
-async function playTrack(track) {
-  if (!mpv.connected) {
-    throw new Error("Audio-engine niet verbonden — herstart de server en controleer EUTERPE_MPV_PATH");
-  }
-
-  const store = await readStore();
-  if (store.playback.currentTrackId != null && store.playback.state === "playing" && !paused) {
-    try {
-      await mpv.pause(true);
-    } catch {
-      /* mpv kan bezig zijn */
-    }
-  }
-
-  const started = await mpv.startPlayback(trackPath(track), track.duration ?? 0);
-  position = started.position;
-  duration = started.duration;
-  paused = false;
-  playStartedAt = Date.now();
-
-  if (duration > 0) saveTrackDuration(track.id, duration);
-
-  await updateStore((store) => {
-    store.playback.currentTrackId = track.id;
-    store.playback.state = "playing";
-    store.playback.position = position;
-    store.playback.duration = duration;
-  });
-
-  startPositionPoll();
-  await notify();
-}
-
-async function onTrackFinished() {
-  if (isManualQueueOp() || finishingTrack) return;
-
-  finishingTrack = true;
-  try {
-    let nextTrack = null;
-    let inPlaylistMode = false;
-    await updateStore((store) => {
-      inPlaylistMode = Boolean(store.playback.activePlaylistId);
-      store.playback.currentTrackId = null;
-      store.playback.position = 0;
-      store.playback.state = "stopped";
-      nextTrack = popNextFromQueue(store);
-      if (!nextTrack && inPlaylistMode) {
-        reshufflePlaylist(store);
-        nextTrack = popNextFromQueue(store);
-      }
-    });
-    if (nextTrack) {
-      await playTrack(nextTrack);
-    } else {
-      stopPositionPoll();
-      if (playbackFlushTimer) {
-        clearTimeout(playbackFlushTimer);
-        playbackFlushTimer = null;
-      }
-      if (mpv.connected) await mpv.stop();
-      paused = true;
-      position = 0;
-      playStartedAt = 0;
-      await updateStore((store) => {
-        store.playback.currentTrackId = null;
-        store.playback.state = "stopped";
-        store.playback.position = 0;
-        if (!inPlaylistMode) store.playback.activePlaylistId = null;
-      });
-      await notify();
-    }
-  } finally {
-    finishingTrack = false;
-  }
-}
-
 export async function play() {
   return withPlaybackLock(async () => {
     if (!mpv.connected) {
@@ -297,7 +368,9 @@ export async function play() {
     if (store.playback.currentTrackId) {
       const track = store.tracks.find((t) => t.id === store.playback.currentTrackId && !t.deleted_at);
       if (track && !(await mpvHasLoadedFile())) {
-        await playTrack(track);
+        await playTrackSkippingErrors(track, {
+          inPlaylistMode: Boolean(store.playback.activePlaylistId),
+        });
         return;
       }
       await mpv.pause(false);
@@ -312,7 +385,11 @@ export async function play() {
       await updateStore((s) => {
         track = popNextFromQueue(s);
       });
-      if (track) await playTrack(track);
+      if (track) {
+        await playTrackSkippingErrors(track, {
+          inPlaylistMode: Boolean(store.playback.activePlaylistId),
+        });
+      }
     }
     await notify();
   });
@@ -393,26 +470,7 @@ export async function removeFromQueue(queueItemId) {
 }
 
 async function switchToTrack(track) {
-  if (!mpv.connected) {
-    throw new Error("Audio-engine niet verbonden");
-  }
-
-  const started = await mpv.startPlayback(trackPath(track), track.duration ?? 0);
-  position = started.position;
-  duration = started.duration;
-  paused = false;
-  playStartedAt = Date.now();
-
-  if (duration > 0) saveTrackDuration(track.id, duration);
-
-  await updateStore((store) => {
-    store.playback.currentTrackId = track.id;
-    store.playback.state = "playing";
-    store.playback.position = position;
-    store.playback.duration = duration;
-  });
-
-  startPositionPoll();
+  await playTrackSkippingErrors(track, { inPlaylistMode: false });
 }
 
 export async function playQueueItemNow(queueItemId) {
@@ -448,9 +506,11 @@ export async function playPlaylist(playlistId) {
   return withPlaybackLock(async () => {
     let first = null;
     await updateStore((store) => {
+      pruneUnplayablePlaylistTracks(store);
       const playlist = store.playlists.find((p) => p.id === playlistId);
-      if (!playlist?.trackIds?.length) return;
-      const order = shuffleWithSpacing(playlist.trackIds, store.playback.shuffleHistory || []);
+      const playableIds = playablePlaylistTrackIds(store, playlist);
+      if (!playableIds.length) return;
+      const order = shuffleWithSpacing(playableIds, store.playback.shuffleHistory || []);
       store.playback.activePlaylistId = playlistId;
       store.playback.shuffleHistory = order;
       store.playback.currentTrackId = null;
@@ -460,10 +520,10 @@ export async function playPlaylist(playlistId) {
         position,
         addedAt: new Date().toISOString(),
       }));
-      first = store.tracks.find((t) => t.id === order[0] && !t.deleted_at);
+      first = store.tracks.find((t) => t.id === order[0] && !t.deleted_at) || null;
       if (first) popNextFromQueue(store);
     });
-    if (first) await playTrack(first);
+    if (first) await playTrackSkippingErrors(first, { inPlaylistMode: true });
     else await notify();
   });
 }
@@ -483,10 +543,14 @@ export async function syncAfterMpvStart() {
   }
 
   if (store.playback.state === "playing") {
-    await playTrack(track);
+    await playTrackSkippingErrors(track, {
+      inPlaylistMode: Boolean(store.playback.activePlaylistId),
+    });
   } else if (store.playback.state === "paused") {
-    await playTrack(track);
-    await pause();
+    const ok = await playTrackSkippingErrors(track, {
+      inPlaylistMode: Boolean(store.playback.activePlaylistId),
+    });
+    if (ok) await pause();
   }
 }
 

@@ -8,8 +8,11 @@ import {
   parsePlaylistDelete,
   parsePlaylistTrackAdd,
   parsePlaylistTrackDelete,
+  playablePlaylistTrackIds,
   playlistContainsTrack,
+  pruneUnplayablePlaylistTracks,
   removeTrackFromPlaylist,
+  removeTrackIdFromAllPlaylists,
 } from "../server/playlist-helpers.js";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -53,6 +56,31 @@ describe("playlist helpers", () => {
     assert.equal(parsePlaylistDelete("/api/playlists/7"), 7);
     assert.equal(parsePlaylistDelete("/api/playlists/7/tracks/12"), null);
     assert.equal(parsePlaylistDelete("/api/playlists/7/tracks"), null);
+  });
+
+  it("prunes deleted and missing track ids from playlists", () => {
+    const store = {
+      tracks: [
+        { id: 1 },
+        { id: 2, deleted_at: "2026-01-01T00:00:00.000Z" },
+      ],
+      playlists: [{ id: 1, trackIds: [1, 2, 99] }],
+    };
+    assert.equal(pruneUnplayablePlaylistTracks(store), true);
+    assert.deepEqual(store.playlists[0].trackIds, [1]);
+    assert.deepEqual(playablePlaylistTrackIds(store, store.playlists[0]), [1]);
+  });
+
+  it("removes a track id from every playlist", () => {
+    const store = {
+      playlists: [
+        { trackIds: [1, 2] },
+        { trackIds: [2, 3] },
+      ],
+    };
+    assert.equal(removeTrackIdFromAllPlaylists(store, 2), true);
+    assert.deepEqual(store.playlists[0].trackIds, [1]);
+    assert.deepEqual(store.playlists[1].trackIds, [3]);
   });
 });
 

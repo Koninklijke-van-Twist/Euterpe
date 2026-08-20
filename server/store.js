@@ -3,6 +3,7 @@ import path from "node:path";
 import { config } from "./config.js";
 import { normalizeQueueIds } from "./queue-helpers.js";
 import { extractTrackMetadata } from "./track-metadata.js";
+import { pruneUnplayablePlaylistTracks } from "./playlist-helpers.js";
 
 const storePath = path.join(config.dataDir, "store.json");
 
@@ -59,6 +60,7 @@ export async function initStore() {
     const raw = await fs.readFile(storePath, "utf8");
     cache = JSON.parse(raw);
     let dirty = normalizeQueueIds(cache);
+    if (pruneUnplayablePlaylistTracks(cache)) dirty = true;
     if (await backfillMissingMetadata(cache)) dirty = true;
     if (dirty) await flushStore();
   } catch {
