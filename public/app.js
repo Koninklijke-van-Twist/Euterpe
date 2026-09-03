@@ -424,6 +424,33 @@ async function loadVersion() {
   }
 }
 
+async function loadAutoStopSettings() {
+  try {
+    const settings = await api("/api/settings");
+    $("auto-stop-enabled").checked = Boolean(settings.autoStopEnabled);
+    $("auto-stop-time").value = settings.autoStopTime || "22:00";
+  } catch {
+    /* settings optioneel bij oude server */
+  }
+}
+
+async function saveAutoStopSettings() {
+  const autoStopEnabled = $("auto-stop-enabled").checked;
+  const autoStopTime = $("auto-stop-time").value || "22:00";
+  try {
+    const settings = await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ autoStopEnabled, autoStopTime }),
+    });
+    $("auto-stop-enabled").checked = Boolean(settings.autoStopEnabled);
+    $("auto-stop-time").value = settings.autoStopTime || "22:00";
+    await refreshPlaybackUi();
+  } catch (err) {
+    await showAlert(err.message || "Instellingen opslaan mislukt", "Auto-stop");
+    await loadAutoStopSettings();
+  }
+}
+
 async function loadData() {
   [tracks, playlists, status] = await Promise.all([
     api("/api/tracks"),
@@ -435,6 +462,7 @@ async function loadData() {
   renderPlaylists();
   renderPlayer();
   renderQueue();
+  await loadAutoStopSettings();
   await loadVersion();
 }
 
@@ -839,6 +867,13 @@ $("playlist-create-btn").addEventListener("click", async () => {
   $("playlist-name").value = "";
   playlists = await api("/api/playlists");
   renderPlaylists();
+});
+
+$("auto-stop-enabled").addEventListener("change", () => {
+  saveAutoStopSettings();
+});
+$("auto-stop-time").addEventListener("change", () => {
+  saveAutoStopSettings();
 });
 
 loadData().then(() => {

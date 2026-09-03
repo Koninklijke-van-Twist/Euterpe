@@ -23,6 +23,7 @@ import {
   trashedTracks,
 } from "./trash.js";
 import { extractTrackMetadata } from "./track-metadata.js";
+import { normalizeAutoStopSettings, parseAutoStopTime } from "./auto-stop.js";
 
 const ALLOWED_EXT = new Set([".mp3", ".flac", ".ogg", ".wav", ".m4a", ".opus", ".aac"]);
 
@@ -398,6 +399,27 @@ export async function handleApi(req, res, url) {
   if (method === "GET" && pathname === "/api/version") {
     const commit = getCachedCommitSha();
     return json(res, 200, { commit });
+  }
+
+  if (method === "GET" && pathname === "/api/settings") {
+    const store = await readStore();
+    return json(res, 200, normalizeAutoStopSettings(store.settings || {}));
+  }
+
+  if (method === "PUT" && pathname === "/api/settings") {
+    const body = JSON.parse((await readBody(req)).toString("utf8"));
+    if (body.autoStopTime != null && !parseAutoStopTime(body.autoStopTime)) {
+      return json(res, 400, { detail: "Ongeldige tijd (gebruik HH:MM)" });
+    }
+    const updated = await updateStore((store) => {
+      if (!store.settings) store.settings = {};
+      if (body.autoStopEnabled != null) store.settings.autoStopEnabled = Boolean(body.autoStopEnabled);
+      if (body.autoStopTime != null) store.settings.autoStopTime = String(body.autoStopTime).trim();
+      store.settings = normalizeAutoStopSettings(store.settings);
+      return store.settings;
+    });
+    await playback.enforceAutoStopIfNeeded();
+    return json(res, 200, updated);
   }
 
   if (method === "POST" && pathname === "/api/admin/restart") {

@@ -78,6 +78,13 @@
       </div>
       <div id="playlist-list" class="playlist-editor"></div>
       <div id="playlist-editor" class="hidden panel inner-panel"></div>
+      <div class="auto-stop-row">
+        <label class="auto-stop-check">
+          <input type="checkbox" id="auto-stop-enabled" />
+          <span>Auto stop music at time</span>
+        </label>
+        <input type="time" id="auto-stop-time" value="22:00" aria-label="Auto-stop tijd" />
+      </div>
     </section>
 
     <footer class="site-footer">
@@ -169,6 +176,6 @@
     </div>
   </div>
 
-  <script type="module" src="/app.js?v=15"></script>
+  <script type="module" src="/app.js?v=16"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
-import { attachMpvEvents, syncAfterMpvStart } from "./playback.js";
+import { attachMpvEvents, syncAfterMpvStart, enforceAutoStopIfNeeded } from "./playback.js";
 import { mpv } from "./mpv.js";
 import { handleApi, handleSse, broadcastStatus } from "./router.js";
 import { initStore } from "./store.js";
@@ -102,3 +102,9 @@ process.on("SIGINT", async () => {
 
 // Push initial status periodically for SSE keepalive
 setInterval(() => broadcastStatus().catch(() => {}), 5000);
+setInterval(() => {
+  enforceAutoStopIfNeeded().catch((err) => {
+    console.warn("Auto-stop check mislukt:", err.message);
+  });
+}, 5000);
+enforceAutoStopIfNeeded().catch(() => {});

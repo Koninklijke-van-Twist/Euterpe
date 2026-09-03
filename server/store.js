@@ -21,7 +21,28 @@ const defaultStore = () => ({
     activePlaylistId: null,
     shuffleHistory: [],
   },
+  settings: {
+    autoStopEnabled: false,
+    autoStopTime: "22:00",
+  },
 });
+
+function ensureSettings(store) {
+  if (!store.settings || typeof store.settings !== "object") {
+    store.settings = { autoStopEnabled: false, autoStopTime: "22:00" };
+    return true;
+  }
+  let dirty = false;
+  if (typeof store.settings.autoStopEnabled !== "boolean") {
+    store.settings.autoStopEnabled = Boolean(store.settings.autoStopEnabled);
+    dirty = true;
+  }
+  if (typeof store.settings.autoStopTime !== "string") {
+    store.settings.autoStopTime = "22:00";
+    dirty = true;
+  }
+  return dirty;
+}
 
 let cache = null;
 let writeChain = Promise.resolve();
@@ -60,6 +81,7 @@ export async function initStore() {
     const raw = await fs.readFile(storePath, "utf8");
     cache = JSON.parse(raw);
     let dirty = normalizeQueueIds(cache);
+    if (ensureSettings(cache)) dirty = true;
     if (pruneUnplayablePlaylistTracks(cache)) dirty = true;
     if (await backfillMissingMetadata(cache)) dirty = true;
     if (dirty) await flushStore();

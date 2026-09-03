@@ -13,6 +13,10 @@ export function makeStore(overrides = {}) {
       activePlaylistId: null,
       shuffleHistory: [],
     },
+    settings: {
+      autoStopEnabled: false,
+      autoStopTime: "22:00",
+    },
     ...overrides,
   };
 }

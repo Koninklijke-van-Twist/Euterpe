@@ -19,6 +19,7 @@ import {
 } from "./playlist-helpers.js";
 import { shuffleWithSpacing } from "./shuffle.js";
 import { readStore, updateStore, mutateStore, flushStore } from "./store.js";
+import { isPastAutoStopTime, shouldEnforceAutoStop } from "./auto-stop.js";
 
 const listeners = new Set();
 
@@ -361,6 +362,7 @@ async function mpvHasLoadedFile() {
 
 export async function play() {
   return withPlaybackLock(async () => {
+    await assertAutoStopAllowsPlayback();
     if (!mpv.connected) {
       throw new Error("Audio-engine niet verbonden");
     }
@@ -408,26 +410,64 @@ export async function pause() {
 
 export async function stop() {
   return withPlaybackLock(async () => {
-    stopPositionPoll();
-    if (playbackFlushTimer) {
-      clearTimeout(playbackFlushTimer);
-      playbackFlushTimer = null;
-    }
-    if (mpv.connected) await mpv.stop();
-    paused = true;
-    position = 0;
-    playStartedAt = 0;
-    await updateStore((s) => {
-      s.playback.currentTrackId = null;
-      s.playback.state = "stopped";
-      s.playback.position = 0;
-      if (s.playback.activePlaylistId != null) {
-        s.playback.activePlaylistId = null;
-        s.queue = [];
-      }
-    });
-    await notify();
+    await stopAllUnlocked();
   });
+}
+
+/** Stop muziek, playlist-modus en leeg altijd de wachtrij (auto-stop / hard stop). */
+export async function stopAll() {
+  return withPlaybackLock(async () => {
+    await stopAllUnlocked();
+  });
+}
+
+async function stopAllUnlocked() {
+  stopPositionPoll();
+  if (playbackFlushTimer) {
+    clearTimeout(playbackFlushTimer);
+    playbackFlushTimer = null;
+  }
+  if (mpv.connected) {
+    try {
+      await mpv.stop();
+    } catch {
+      /* ignore */
+    }
+  }
+  paused = true;
+  position = 0;
+  playStartedAt = 0;
+  await updateStore((s) => {
+    s.playback.currentTrackId = null;
+    s.playback.state = "stopped";
+    s.playback.position = 0;
+    s.playback.activePlaylistId = null;
+    s.queue = [];
+  });
+  await notify();
+}
+
+function autoStopBlockedError() {
+  return Object.assign(
+    new Error("Auto-stop is actief — muziek speelt niet na de ingestelde tijd"),
+    { status: 409 }
+  );
+}
+
+async function assertAutoStopAllowsPlayback() {
+  const store = await readStore();
+  if (isPastAutoStopTime(store.settings || {})) {
+    throw autoStopBlockedError();
+  }
+}
+
+/** Periodieke check: alles stoppen als auto-stoptijd voorbij is. */
+export async function enforceAutoStopIfNeeded(now = new Date()) {
+  const store = await readStore();
+  if (!shouldEnforceAutoStop(store, now)) return false;
+  console.log("[euterpe] auto-stop: alles stoppen");
+  await stopAll();
+  return true;
 }
 
 export async function skip() {
@@ -477,6 +517,7 @@ export async function playQueueItemNow(queueItemId) {
   enterManualQueueOp();
   try {
     return await withPlaybackLock(async () => {
+      await assertAutoStopAllowsPlayback();
       advancingTrack = true;
       try {
         let track = null;
@@ -504,6 +545,7 @@ export async function playQueueItemNow(queueItemId) {
 
 export async function playPlaylist(playlistId) {
   return withPlaybackLock(async () => {
+    await assertAutoStopAllowsPlayback();
     let first = null;
     await updateStore((store) => {
       pruneUnplayablePlaylistTracks(store);
