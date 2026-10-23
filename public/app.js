@@ -12,6 +12,9 @@ let suppressQueueSseUntil = 0;
 let uploadInProgress = false;
 let libraryArtistFilter = "";
 let librarySearchQuery = "";
+let remoteResults = [];
+let remoteSearched = false;
+let remoteBusy = false;
 
 function isPlaylistMode() {
   return status?.active_playlist_id != null;
@@ -748,11 +751,88 @@ async function uploadFiles(fileList) {
   }
 }
 
+function renderRemoteResults() {
+  const list = $("remote-results");
+  if (!remoteResults.length) {
+    list.innerHTML = `<li class="empty-state">${remoteSearched ? "Geen resultaten" : "Zoek een nummer op YouTube of Spotify"}</li>`;
+    return;
+  }
+  list.innerHTML = remoteResults.map((t, i) => `
+    <li>
+      <div class="track-info">
+        <div class="title">${esc(t.title)}</div>
+        <div class="meta">${esc(t.artist || "Onbekend")} · ${formatTime(t.duration)} · ${esc(t.source)}</div>
+      </div>
+      <div class="track-actions">
+        <button type="button" class="btn-small" data-remote-play="${i}" ${remoteBusy ? "disabled" : ""} title="Download en zet in de wachtrij">▶</button>
+        <button type="button" class="btn-small" data-remote-save="${i}" ${remoteBusy ? "disabled" : ""}>Opslaan</button>
+      </div>
+    </li>
+  `).join("");
+}
+
+async function searchRemoteUi() {
+  const q = $("remote-query").value.trim();
+  if (!q || remoteBusy) return;
+  remoteBusy = true;
+  $("remote-search-btn").disabled = true;
+  try {
+    const source = $("remote-source").value;
+    remoteResults = await api(`/api/remote/search?source=${encodeURIComponent(source)}&q=${encodeURIComponent(q)}`);
+    remoteSearched = true;
+  } catch (err) {
+    remoteResults = [];
+    remoteSearched = true;
+    await showAlert(err.message || "Zoeken mislukt", "Zoeken");
+  } finally {
+    remoteBusy = false;
+    $("remote-search-btn").disabled = false;
+    renderRemoteResults();
+  }
+}
+
+async function fetchRemote(index, play) {
+  const item = remoteResults[index];
+  if (!item || remoteBusy) return;
+  remoteBusy = true;
+  renderRemoteResults();
+  try {
+    const result = await api("/api/remote/fetch", {
+      method: "POST",
+      body: JSON.stringify({
+        url: item.url,
+        title: item.title,
+        artist: item.artist,
+        duration: item.duration,
+        play,
+      }),
+    });
+    tracks = await api("/api/tracks");
+    renderArtistFilter();
+    renderTracks();
+    if (play) await refreshPlaybackUi();
+    if (play && result?.queued === false && result.detail) await showAlert(result.detail);
+  } catch (err) {
+    await showAlert(err.message || "Ophalen mislukt", "Ophalen");
+  } finally {
+    remoteBusy = false;
+    renderRemoteResults();
+  }
+}
+
 function clickTarget(e, selector) {
   return e.target instanceof Element ? e.target.closest(selector) : null;
 }
 
 document.addEventListener("click", async (e) => {
+  const remoteEl = clickTarget(e, "[data-remote-play], [data-remote-save]");
+  if (remoteEl) {
+    e.preventDefault();
+    const index = Number(remoteEl.dataset.remotePlay ?? remoteEl.dataset.remoteSave);
+    await fetchRemote(index, remoteEl.dataset.remotePlay != null);
+    return;
+  }
+
   const queueActionEl = clickTarget(e, "[data-queue-id]");
   if (queueActionEl) {
     e.preventDefault();
@@ -859,6 +939,12 @@ document.addEventListener("change", (e) => {
     toggleTrackInPlaylist(Number(t.dataset.plPicker), t.checked);
   }
 });
+
+$("remote-search-btn").addEventListener("click", () => searchRemoteUi());
+$("remote-query").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") searchRemoteUi();
+});
+renderRemoteResults();
 
 $("playlist-create-btn").addEventListener("click", async () => {
   const name = $("playlist-name").value.trim();
