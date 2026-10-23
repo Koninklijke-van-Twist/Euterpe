@@ -39,6 +39,20 @@
       </div>
     </section>
 
+    <section class="panel section-spaced" id="remote-panel">
+      <h2>YouTube & Spotify</h2>
+      <p class="modal-hint">Zoeken en ophalen via yt-dlp. Spotify-muziek komt als YouTube-audio binnen; podcastafleveringen rechtstreeks.</p>
+      <div class="playlist-create remote-search">
+        <select id="remote-source" aria-label="Bron">
+          <option value="youtube">YouTube</option>
+          <option value="spotify">Spotify</option>
+        </select>
+        <input id="remote-query" type="search" placeholder="Zoek of plak een link…" autocomplete="off" aria-label="Zoek op YouTube of Spotify" />
+        <button class="btn-primary" id="remote-search-btn" type="button">Zoek</button>
+      </div>
+      <ul class="track-list" id="remote-results"></ul>
+    </section>
+
     <div class="grid">
       <section class="panel">
         <div class="panel-header">
@@ -176,6 +190,6 @@
     </div>
   </div>
 
-  <script type="module" src="/app.js?v=16"></script>
+  <script type="module" src="/app.js?v=17"></script>
 </body>
 </html>

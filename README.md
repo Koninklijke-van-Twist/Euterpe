@@ -11,6 +11,7 @@ Headless mediaspeler bestuurd via een webinterface. Audio wordt afgespeeld op de
 | Backend | **Node.js** — alleen ingebouwde modules (`http`, `fs`, `crypto`, `net`, …) |
 | Frontend | **Vanilla HTML/CSS/JS** — geen build-stap, geen frameworks |
 | Audio-engine | **MPV** via JSON IPC |
+| Online audio | **yt-dlp** + ffmpeg (YouTube, Spotify-podcast; Spotify-muziek via YouTube) |
 | Opslag | JSON-bestand + lokale audiobestanden |
 
 **Geen npm-dependencies.** Alleen Node.js en MPV als externe vereisten.
@@ -18,6 +19,7 @@ Headless mediaspeler bestuurd via een webinterface. Audio wordt afgespeeld op de
 ## Vereisten
 
 - [Node.js](https://nodejs.org/) 20+
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) en ffmpeg — zoeken en audio ophalen van YouTube en Spotify
 - Audio-engine met JSON IPC:
   - **Arch / Linux:** [mpv](https://mpv.io/) (`pacman -S mpv`)
   - **Windows (dev):** [mpv.net](https://github.com/mpvnet-player/mpv.net) in `PATH` als `mpvnet`
@@ -36,7 +38,7 @@ Op Windows wordt standaard `mpvnet` gebruikt als `EUTERPE_MPV_PATH` niet is geze
 ## Arch Linux (productie)
 
 ```bash
-sudo pacman -S nodejs mpv git
+sudo pacman -S nodejs mpv yt-dlp ffmpeg git
 git clone <repo> /opt/euterpe && cd /opt/euterpe
 chmod +x scripts/*.sh
 sudo ./scripts/install-service.sh
@@ -149,6 +151,8 @@ MPV kent geen wachtrij. Bij `end-file` bepaalt de backend het volgende nummer en
 | Methode | Endpoint | Beschrijving |
 |---------|----------|--------------|
 | POST | `/api/tracks/upload` | Upload (multipart) |
+| GET | `/api/remote/search?source=youtube\|spotify&q=` | Zoeken via yt-dlp |
+| POST | `/api/remote/fetch` | Audio opslaan (`play: true` zet het in de wachtrij) |
 | GET | `/api/tracks` | Bibliotheek |
 | GET/POST/DELETE | `/api/queue` | Wachtrij |
 | GET | `/api/playback/status` | Status |
@@ -173,6 +177,7 @@ Afspeellijsten worden geshuffeld. Na het laatste nummer: opnieuw shufflen. De la
 | `EUTERPE_SECRET` | `change-me-in-production` | (reserved) |
 | `EUTERPE_DATA_DIR` | `./data` | Data-map |
 | `EUTERPE_MPV_PATH` | `mpvnet` (Windows) / `mpv` (Linux) | Pad naar mpv of mpvnet |
+| `EUTERPE_YTDLP_PATH` | `yt-dlp` | Pad naar yt-dlp |
 | `EUTERPE_MPV_AO` | `alsa` (Linux) / mpv-default (Windows) | Audio-output (`alsa`, `pulse`, …). Leeg = mpv kiest zelf |
 | `EUTERPE_MPV_AUDIO_DEVICE` | — | mpv `--audio-device` (bijv. `alsa/default`, `alsa/plughw:0,0`) |
 | `EUTERPE_MPV_EXTRA_ARGS` | — | Extra mpv-flags, spaties gescheiden |

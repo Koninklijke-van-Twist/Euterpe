@@ -24,6 +24,7 @@ import {
 } from "./trash.js";
 import { extractTrackMetadata } from "./track-metadata.js";
 import { normalizeAutoStopSettings, parseAutoStopTime } from "./auto-stop.js";
+import { assertFetchUrl, downloadAudio, searchRemote } from "./ytdlp.js";
 
 const ALLOWED_EXT = new Set([".mp3", ".flac", ".ogg", ".wav", ".m4a", ".opus", ".aac"]);
 
@@ -62,6 +63,84 @@ function parseMultipart(buffer, boundary) {
     start = end + delim.length + 2;
   }
   return parts;
+}
+
+function clipText(value, fallback) {
+  const s = String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  return s || fallback;
+}
+
+async function importRemote(body) {
+  const url = assertFetchUrl(body?.url);
+  const play = Boolean(body?.play);
+  const title = clipText(body?.title, "Onbekend");
+  const artist = clipText(body?.artist, "");
+  const duration = body?.duration == null || body.duration === "" ? null : Number(body.duration);
+  const storedDuration = Number.isFinite(duration) ? Math.round(duration) : null;
+
+  let track = activeTracks(await readStore()).find((t) => t.source_url === url) || null;
+  if (!track) {
+    const file = await downloadAudio(url, config.audioDir);
+    if (!ALLOWED_EXT.has(file.ext)) {
+      await fs.unlink(file.path).catch(() => {});
+      throw Object.assign(new Error(`Ongeschikt formaat: ${file.ext}`), { status: 502 });
+    }
+    const original = `${artist ? `${artist} - ` : ""}${title}${file.ext}`;
+    track = await updateStore((store) => {
+      const again = activeTracks(store).find((t) => t.source_url === url);
+      if (again) return again;
+      const created = {
+        id: store.meta.nextTrackId++,
+        filename: file.filename,
+        original_name: original,
+        title,
+        artist: artist || null,
+        album: null,
+        duration: storedDuration,
+        file_size: file.file_size,
+        created_at: new Date().toISOString(),
+        source_url: url,
+      };
+      store.tracks.unshift(created);
+      return created;
+    });
+    if (track.filename !== file.filename) await fs.unlink(file.path).catch(() => {});
+  }
+
+  let queued = false;
+  let detail = null;
+  if (play) {
+    try {
+      let autoPlay = false;
+      await updateStore((store) => {
+        assertManualQueueAllowed(store);
+        autoPlay = shouldAutoPlayOnEnqueue(store);
+        const position = store.queue.length;
+        store.queue.forEach((q) => {
+          if (q.position >= position) q.position += 1;
+        });
+        store.queue.push({
+          id: store.meta.nextQueueId++,
+          trackId: track.id,
+          position,
+          addedAt: new Date().toISOString(),
+        });
+        return true;
+      });
+      queued = true;
+      if (autoPlay) {
+        try {
+          await playback.play();
+        } catch (err) {
+          console.warn("Auto-play na yt-dlp mislukt:", err.message);
+        }
+      }
+      await broadcastStatus();
+    } catch (err) {
+      detail = err.message;
+    }
+  }
+  return { track, queued, detail };
 }
 
 function playlistOut(store, p) {
@@ -393,6 +472,29 @@ export async function handleApi(req, res, url) {
       return json(res, 200, { ok: true });
     } catch (err) {
       return json(res, 503, { detail: err.message });
+    }
+  }
+
+  if (method === "GET" && pathname === "/api/remote/search") {
+    try {
+      const results = await searchRemote(url.searchParams.get("source") || "youtube", url.searchParams.get("q") || "");
+      return json(res, 200, results);
+    } catch (err) {
+      return json(res, err.status || 500, { detail: err.message });
+    }
+  }
+
+  if (method === "POST" && pathname === "/api/remote/fetch") {
+    let body;
+    try {
+      body = JSON.parse((await readBody(req)).toString("utf8"));
+    } catch {
+      return json(res, 400, { detail: "Ongeldige body" });
+    }
+    try {
+      return json(res, 200, await importRemote(body));
+    } catch (err) {
+      return json(res, err.status || 500, { detail: err.message });
     }
   }
 

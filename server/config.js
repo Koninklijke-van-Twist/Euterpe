@@ -121,6 +121,7 @@ export const config = {
   mpvAudioDevice: resolveMpvAudioDevice(),
   mpvExtraArgs: resolveMpvExtraArgs(),
   mpvSocket: process.env.EUTERPE_MPV_SOCKET || path.join(root, "data", "mpv.sock"),
+  ytDlpPath: process.env.EUTERPE_YTDLP_PATH || "yt-dlp",
   publicDir: path.join(root, "public"),
   isWindows: process.platform === "win32",
 };
